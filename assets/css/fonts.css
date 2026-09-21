@@ -1,0 +1,33 @@
+@font-face {
+    font-family: 'Sabbath Black';
+    src: url('../font/Sabbath-Black.ttf') format('truetype');
+}
+
+@font-face {
+    font-family: 'Sabbath Black';
+    font-weight: bold;
+    src: url('../font/Sabbath-Black-Heavy.otf') format('opentype');
+}
+
+@font-face {
+    font-family: 'Warbler';
+    src: url('../font/Warbler-Regular.otf') format('opentype');
+}
+
+@font-face {
+    font-family: 'Warbler';
+    font-weight: bold;
+    src: url('../font/Warbler-Bold.otf') format('opentype');
+}
+
+@font-face {
+    font-family: 'Warbler';
+    font-style: italic;
+    src: url('../font/Warbler-Italic.otf') format('opentype');
+}
+
+@font-face {
+    font-family: 'Warbler';
+    font-style: oblique;
+    src: url('../font/Warbler-BoldItalic.otf') format('opentype');
+}
