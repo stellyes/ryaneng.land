@@ -2,10 +2,9 @@
 @import url('assets/css/scale.css');
 
 :root {
-    /* scaled together per breakpoint so the cathedral stays proportional to the text */
     --title-size: 128px;
     --item-size: 36px;
-    --image-height: 154%;
+    --image-height: 60vh;
     --nav-width: 8vw;
     --nav-item-size: 28px;
     --nav-bar-height: 0px;
@@ -19,6 +18,8 @@
 }
 
 body {
+    height: 100vh;
+    width: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -28,24 +29,16 @@ body {
 }
 
 .home-container {
-    width: 75vw;
-    height: 40vh;
-    position:absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-40%, -50%);
+    align-self: center;
     display: flex;
     flex-direction: row;
-    
+    justify-content: center;
+    align-items: center;
 }
 
 .home-container * {
     font-family: 'Sabbath Black';
     text-align: left;
-}
-
-.home-container > a {
-    display: contents;
 }
 
 .home-directory {
@@ -69,11 +62,8 @@ body {
 }
 
 .home-directory-item {
-    position: relative;
-    margin-top: 10px;
+    margin: 0.5vh 0;
     font-size: var(--item-size);
-    white-space: nowrap;
-    width: auto;
 }
 
 .home-directory-item a {
@@ -95,15 +85,19 @@ body {
 }
 
 .home-image {
+    padding-right: 5vw;
     height: var(--image-height);
     align-self: center;
-    margin-left: 10vw;;
+    transition: filter 3s ease-in-out;
+}
+
+.home-image:hover {
+    filter: drop-shadow(0 0 10px rgb(241, 218, 168));
 }
 
 .page-content {
     width: 65vw;
     padding: 5vh 0;
-    margin: 5vh auto;
     background-color: rgba(0, 0, 0, 0.95);
     border: 1px solid rgb(241, 218, 168);
 }

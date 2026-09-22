@@ -6,6 +6,4 @@ Just go to the website https://ryaneng.land
 
 ## Design choices
 
-I'm one guy with a ton of different hobbies. I have no interest in developing/maintaining a full React website. There's a beauty in the simplicity of the OG web stack (HTML/CSS/JS). I want this website to feel like stepping back into 2003, with a nuanced flare. Choke on it, idc.
-
-##
+I'm one guy with a ton of different hobbies. I have no interest in developing/maintaining a full React website. There's a beauty in the simplicity of the OG web stack (HTML/CSS/JS). I want this website to feel like stepping back into 2003, with my own flare. Choke on it, idc.
