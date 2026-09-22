@@ -18,7 +18,7 @@
 }
 
 body {
-    height: 100vh;
+    min-height: 100vh;
     width: 100%;
     display: flex;
     justify-content: center;
@@ -26,6 +26,7 @@ body {
     background-image: url('assets/img/forest-floor-texture.webp');
     background-color:rgb(14, 56, 2);
     background-blend-mode: darken;
+    
 }
 
 .home-container {
@@ -96,10 +97,16 @@ body {
 }
 
 .page-content {
-    width: 65vw;
-    padding: 5vh 0;
+    width: fit-content;
+    margin: 5vh auto;
+    padding: 5vh;
     background-color: rgba(0, 0, 0, 0.95);
     border: 1px solid rgb(241, 218, 168);
+}
+
+.small-caps {
+    font-weight: bold;
+    font-variant: small-caps;
 }
 
 /* ============ Side Navigation ============ */
@@ -181,7 +188,26 @@ main {
 
 /* ============ About Page ============ */
 
+.about-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
 
+.about-content h1 {
+    font-family: 'Sabbath Black';
+    text-align: right;
+    font-size: 10vh;
+    width: 50vw;
+}
+
+.about-content p {
+    text-align: left;
+    font-size: 3vh;
+    width: 50vw;
+    margin-top: 2vh;
+}
 
 /* ============ Contact Page ============ */
 
@@ -196,7 +222,7 @@ main {
 .contact-content h1 {
     font-family: 'Sabbath Black';
     text-align: right;
-    font-size: 15vh;
+    font-size: 10vh;
     width: 50vw;
 }
 
@@ -207,8 +233,5 @@ main {
     margin-top: 4vh;
 }
 
-.small-caps {
-    font-weight: bold;
-    font-variant: small-caps;
-}
+
     
