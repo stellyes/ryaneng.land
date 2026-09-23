@@ -52,7 +52,7 @@
     ul.side-nav-list {
         display: none;
         position: absolute;
-        top: calc(100% + 0.5em);
+        top: calc(100% + 10vh);
         left: 0;
         width: max-content;
         min-width: 260px;
@@ -71,6 +71,7 @@
 
     .home-nav-item {
         display: list-item;
+        
     }
 
     .home-container {
@@ -97,25 +98,70 @@
         --image-height: 64vh;
     }
 
+    body {
+        width: 100vw;
+    }
+
+    .nav-toggle {
+        position: fixed;
+    }
+
     .home-directory-list {
         flex-direction: column;
         gap: 0;
-    }
-    
-    .page-content {
-        width: 75vw;
-        padding: 3vh 0vw;
     }
 
     .page-content h1 {
         font-family: 'Sabbath Black';
         text-align: right;
         font-size: 5vh;
+        width: 75vw;
     }
 
     .page-content p {
         text-align: left;
-        font-size: 2.5vh;
+        font-size: 1.1em;
         margin-top: 2vh;
+        width: 65vw;
     }
+
+    .page-content ul {
+        width: 60vw;
+        font-size: 1em;
+    }
+
+
+    .page-content .blog-list {
+        width: 100vw;
+
+    }
+
+    .blog-list {
+        width: 80vw;
+    }
+
+    .blog-list-title {
+        font-size: 1.6em;
+        text-align: right;
+        max-width: 70vw;
+        margin-right: 10vw;
+        margin-left: 5vw;
+    }
+
+    .blog-list-preview {
+        margin-left: 5vw;
+    }
+
+    .blog-back-link {
+        align-self: center; 
+        font-size: 2.5vh;
+    }
+
+    .blog-post-date {
+        align-self: flex-end;
+        font-size: 0.8em;
+        max-width: 70vw;
+        margin-right: 25vw;
+    }
+
 }
