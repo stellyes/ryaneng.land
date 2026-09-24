@@ -132,36 +132,41 @@
 
 
     .page-content .blog-list {
-        width: 100vw;
-
+        width: 100%;
     }
 
-    .blog-list {
-        width: 80vw;
+    .blog-list-item {
+        gap: 0.5em;
     }
 
     .blog-list-title {
         font-size: 1.6em;
         text-align: right;
-        max-width: 70vw;
-        margin-right: 10vw;
-        margin-left: 5vw;
-    }
-
-    .blog-list-preview {
-        margin-left: 5vw;
     }
 
     .blog-back-link {
-        align-self: center; 
+        align-self: flex-start; 
         font-size: 2.5vh;
+    }
+
+    .blog-post-full {
+        --blog-content-width: 100%;
+    }
+
+    .page-content .blog-post-title,
+    .blog-post-date,
+    .blog-post-body {
+        width: 100%;
     }
 
     .blog-post-date {
         align-self: flex-end;
         font-size: 0.8em;
-        max-width: 70vw;
-        margin-right: 25vw;
+    }
+
+    .blog-post-body ul,
+    .blog-post-body ol {
+        font-size: 1.1em;
     }
 
 }
