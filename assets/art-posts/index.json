@@ -1,0 +1,37 @@
+[
+    {
+        "slug": "badtime-collection",
+        "title": "The BADTIME! Collection",
+        "date": "2026-09-24",
+        "type": "music",
+        "preview": "The BADTIME! complete catalogue, recorded between 2021 and 2023.",
+        "summary": "The _BADTIME!_ complete catalogue. This collection features the instrumentals and vocal tracks recorded between 2021 and 2023. This project was quickly abandoned when I realize that I am, in fact, the most _goated white boy absolutely dripped out in the sauce_, and that my voice doesn't suck, I was just getting the ropes of recording in a style that I liked.",
+        "tracks": [
+            {
+                "title": "GOOD WEATHER (HAPPY BIRTHDAY)",
+                "file": "./assets/art-posts/audio/badtime-catalog/good-weather.mp3",
+                "summary": "This was originally a diss-track for my dad. It still kind of is. Now, I see it more as an electro-punk track, as its essence really gives 'sonically a shitpost'."
+            },
+            {
+                "title": "PICK THE FLOWER, PLANT SOME MORE, REPEAT",
+                "file": "./assets/art-posts/audio/badtime-catalog/ptfpsmr.mp3",
+                "summary": "Just something I threw together before work one day. Used a default VOX in FL Studio to create the vocal track, using a snip from a poem I wrote at the time. Or maybe a journal entry. I don't really remember."
+            },
+            {
+                "title": "IT'S FINE (Instrumental)",
+                "file": "./assets/art-posts/audio/badtime-catalog/its-fine-instrumental.mp3",
+                "summary": "The first track I ever made for this project. I think I was supposed to be studying for my major. I was not. In fact, I was smoking weed and fiddling around on my (then) brand new computer :)"
+            },
+            {
+                "title": "IT'S FINE",
+                "file": "./assets/art-posts/audio/badtime-catalog/its-fine.mp3",
+                "summary": "The vocal version of 'IT'S FINE'. Yeah."
+            },
+            {
+                "title": "mach 666 overdrive racecar fast mode - directors cut",
+                "file": "./assets/art-posts/audio/badtime-catalog/mach-666-overdrive-racecar-fast-mode_directors-cut.mp3",
+                "summary": "As I continue to write these descriptions I'm realizing that this entire project was named in a single night, likely in a manic frenzy."
+            }
+        ]
+    }
+]

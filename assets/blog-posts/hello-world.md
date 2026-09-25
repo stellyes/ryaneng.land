@@ -45,7 +45,7 @@ You land on blog.html and `renderPostList()` fetches `index.json`, sorts by date
    paragraphs.
 4. Both placeholder maps are string-replaced back into the resulting HTML
    (`<p>CODEBLOCK_PLACEHOLDER_0</p>` → the real `<pre><code>`, etc.).
-5. `hljs.highlightElement()` runs over every `pre code` in the final DOM for syntax coloring.
+5. `hljs.highlightElement()` runs over every `pre code` in the final DOM for syntax coloring. (shoutout to [highlight.js](https://highlightjs.org/) for the continued updates over the years)
 
 Now, the more pressing question.
 

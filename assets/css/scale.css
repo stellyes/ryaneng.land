@@ -169,4 +169,58 @@
         font-size: 1.1em;
     }
 
+    .page-content .art-list {
+        width: 100%;
+    }
+
+    .art-list-item {
+        gap: 0.5em;
+    }
+
+    .art-list-title {
+        font-size: 1.6em;
+        text-align: right;
+    }
+
+    .art-back-link {
+        align-self: flex-start;
+        font-size: 2.5vh;
+    }
+
+    .art-post {
+        --art-content-width: 100%;
+    }
+
+    .page-content .art-post-title,
+    .art-post-date,
+    .art-post-summary,
+    .art-track-summary,
+    .art-carousel-summary,
+    .art-player-layout,
+    .art-carousel {
+        width: 100%;
+    }
+
+    .art-post-date {
+        align-self: flex-end;
+        font-size: 0.8em;
+    }
+
+    .art-player-layout {
+        flex-direction: column;
+    }
+
+    .art-track-list {
+        width: 100%;
+        max-height: 12em;
+    }
+
+    .art-player-volume-row {
+        width: 100%;
+    }
+
+    .art-carousel-image {
+        max-height: 40vh;
+    }
+
 }
