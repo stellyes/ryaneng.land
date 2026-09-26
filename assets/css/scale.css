@@ -98,6 +98,11 @@
         --image-height: 64vh;
     }
 
+    /* fit-content collapses percentage-width children to 0, so give it a real size */
+    .page-content {
+        width: 92vw;
+    }
+
     body {
         width: 100vw;
     }
@@ -196,7 +201,7 @@
     .art-post-summary,
     .art-track-summary,
     .art-carousel-summary,
-    .art-player-layout,
+    .art-player,
     .art-carousel {
         width: 100%;
     }
@@ -206,11 +211,20 @@
         font-size: 0.8em;
     }
 
-    .art-player-layout {
-        flex-direction: column;
+    .art-player-icon-btn.art-player-playpause {
+        width: 1.6em;
+        height: 1.6em;
     }
 
-    .art-track-list {
+    .art-player-transport-row {
+        gap: 0.6em;
+    }
+
+    .art-player-time {
+        font-size: 0.85em;
+    }
+
+    .page-content .art-track-list {
         width: 100%;
         max-height: 12em;
     }

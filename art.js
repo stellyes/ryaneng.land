@@ -142,52 +142,67 @@ function renderMarkdown(markdown) {
   return converter.makeHtml(markdown);
 }
 
+const VOLUME_STORAGE_KEY = 'art-player-volume';
+
+function getStoredVolume() {
+  const stored = Number(localStorage.getItem(VOLUME_STORAGE_KEY));
+  return Number.isFinite(stored) && stored >= 0 && stored <= 100 ? stored : 100;
+}
+
+function setStoredVolume(value) {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(value));
+  } catch (err) {
+    // localStorage may be unavailable (e.g. private browsing); ignore.
+  }
+}
+
 function buildMusicPlayer(article, detail) {
   const tracks = detail.tracks || [];
   if (!tracks.length) return;
 
   let trackIndex = 0;
 
-  const layout = document.createElement('div');
-  layout.className = 'art-player-layout';
-
   const player = document.createElement('div');
   player.className = 'art-player';
 
+  const topSection = document.createElement('div');
+  topSection.className = 'art-player-section';
+
+  const titleRow = document.createElement('div');
+  titleRow.className = 'art-player-title-row';
+
   const trackTitle = document.createElement('div');
   trackTitle.className = 'art-player-track-title';
-  player.appendChild(trackTitle);
 
-  const controls = document.createElement('div');
-  controls.className = 'art-player-controls';
+  const trackTitleInner = document.createElement('span');
+  trackTitleInner.className = 'art-player-track-title-inner';
+  trackTitle.appendChild(trackTitleInner);
+
+  const skipGroup = document.createElement('div');
+  skipGroup.className = 'art-player-skip-group';
 
   const prevBtn = document.createElement('button');
   prevBtn.type = 'button';
-  prevBtn.className = 'art-player-btn art-player-prev';
+  prevBtn.className = 'art-player-icon-btn art-player-prev';
   prevBtn.setAttribute('aria-label', 'Previous track');
-  prevBtn.textContent = '\u23EE';
-
-  const playPauseBtn = document.createElement('button');
-  playPauseBtn.type = 'button';
-  playPauseBtn.className = 'art-player-btn art-player-playpause';
-  playPauseBtn.setAttribute('aria-label', 'Play');
-  playPauseBtn.textContent = '\u25B6';
 
   const nextBtn = document.createElement('button');
   nextBtn.type = 'button';
-  nextBtn.className = 'art-player-btn art-player-next';
+  nextBtn.className = 'art-player-icon-btn art-player-next';
   nextBtn.setAttribute('aria-label', 'Next track');
-  nextBtn.textContent = '\u23ED';
 
-  controls.append(prevBtn, playPauseBtn, nextBtn);
-  player.appendChild(controls);
+  skipGroup.append(prevBtn, nextBtn);
+  titleRow.append(trackTitle, skipGroup);
+  topSection.appendChild(titleRow);
 
-  const seekRow = document.createElement('div');
-  seekRow.className = 'art-player-seek-row';
+  const transportRow = document.createElement('div');
+  transportRow.className = 'art-player-transport-row';
 
-  const currentTimeLabel = document.createElement('span');
-  currentTimeLabel.className = 'art-player-time art-player-time-current';
-  currentTimeLabel.textContent = '0:00';
+  const playPauseBtn = document.createElement('button');
+  playPauseBtn.type = 'button';
+  playPauseBtn.className = 'art-player-icon-btn art-player-playpause';
+  playPauseBtn.setAttribute('aria-label', 'Play');
 
   const seek = document.createElement('input');
   seek.type = 'range';
@@ -195,40 +210,39 @@ function buildMusicPlayer(article, detail) {
   seek.min = '0';
   seek.max = '1000';
   seek.value = '0';
+  seek.setAttribute('aria-label', 'Seek');
 
-  const durationLabel = document.createElement('span');
-  durationLabel.className = 'art-player-time art-player-time-duration';
-  durationLabel.textContent = '0:00';
+  const timeLabel = document.createElement('span');
+  timeLabel.className = 'art-player-time';
+  timeLabel.textContent = '0:00 / 0:00';
 
-  seekRow.append(currentTimeLabel, seek, durationLabel);
-  player.appendChild(seekRow);
+  transportRow.append(playPauseBtn, seek, timeLabel);
+  topSection.appendChild(transportRow);
+  player.appendChild(topSection);
 
-  const volumeRow = document.createElement('div');
-  volumeRow.className = 'art-player-volume-row';
+  const volumeSection = document.createElement('div');
+  volumeSection.className = 'art-player-section art-player-volume-row';
 
   const muteBtn = document.createElement('button');
   muteBtn.type = 'button';
-  muteBtn.className = 'art-player-btn art-player-mute';
+  muteBtn.className = 'art-player-icon-btn art-player-mute';
   muteBtn.setAttribute('aria-label', 'Mute');
-  muteBtn.textContent = '\uD83D\uDD0A';
 
   const volume = document.createElement('input');
   volume.type = 'range';
   volume.className = 'art-player-volume';
   volume.min = '0';
   volume.max = '100';
-  volume.value = '100';
+  volume.value = String(getStoredVolume());
   volume.setAttribute('aria-label', 'Volume');
 
-  volumeRow.append(muteBtn, volume);
-  player.appendChild(volumeRow);
+  volumeSection.append(muteBtn, volume);
+  player.appendChild(volumeSection);
 
   const audio = document.createElement('audio');
   audio.className = 'art-player-audio';
   audio.preload = 'metadata';
-
-  layout.appendChild(player);
-  layout.appendChild(audio);
+  player.appendChild(audio);
 
   const trackList = document.createElement('ul');
   trackList.className = 'art-track-list';
@@ -251,14 +265,28 @@ function buildMusicPlayer(article, detail) {
     return item;
   });
 
-  layout.appendChild(trackList);
-  article.appendChild(layout);
+  player.appendChild(trackList);
+  article.appendChild(player);
 
   const trackSummary = document.createElement('div');
   trackSummary.className = 'art-track-summary';
   article.appendChild(trackSummary);
 
   let isSeeking = false;
+
+  function updateTitleMarquee() {
+    trackTitle.classList.remove('is-marquee');
+    trackTitle.style.removeProperty('--marquee-distance');
+    requestAnimationFrame(() => {
+      const overflow = trackTitleInner.scrollWidth - trackTitle.clientWidth;
+      if (overflow > 4) {
+        trackTitle.style.setProperty('--marquee-distance', `-${overflow}px`);
+        trackTitle.classList.add('is-marquee');
+      }
+    });
+  }
+
+  window.addEventListener('resize', updateTitleMarquee);
 
   function updateButtonStates() {
     prevBtn.disabled = trackIndex === 0;
@@ -272,11 +300,11 @@ function buildMusicPlayer(article, detail) {
     trackIndex = index;
     const track = tracks[trackIndex];
     audio.src = track.file;
-    trackTitle.textContent = track.title || `Track ${trackIndex + 1}`;
+    trackTitleInner.textContent = track.title || `Track ${trackIndex + 1}`;
+    updateTitleMarquee();
     trackSummary.innerHTML = track.summary ? renderMarkdown(track.summary) : '';
     seek.value = '0';
-    currentTimeLabel.textContent = '0:00';
-    durationLabel.textContent = '0:00';
+    timeLabel.textContent = '0:00 / 0:00';
     updateButtonStates();
     if (autoplay) {
       audio.play();
@@ -304,31 +332,29 @@ function buildMusicPlayer(article, detail) {
   });
 
   audio.addEventListener('play', () => {
-    playPauseBtn.textContent = '\u23F8';
+    playPauseBtn.classList.add('is-playing');
     playPauseBtn.setAttribute('aria-label', 'Pause');
   });
 
   audio.addEventListener('pause', () => {
-    playPauseBtn.textContent = '\u25B6';
+    playPauseBtn.classList.remove('is-playing');
     playPauseBtn.setAttribute('aria-label', 'Play');
   });
 
-  let lastVolume = 1;
+  audio.volume = Number(volume.value) / 100;
+  let lastVolume = audio.volume || 1;
 
   function updateMuteButton() {
-    if (audio.muted || audio.volume === 0) {
-      muteBtn.textContent = '\uD83D\uDD07';
-      muteBtn.setAttribute('aria-label', 'Unmute');
-    } else {
-      muteBtn.textContent = '\uD83D\uDD0A';
-      muteBtn.setAttribute('aria-label', 'Mute');
-    }
+    const isMuted = audio.muted || audio.volume === 0;
+    muteBtn.classList.toggle('is-muted', isMuted);
+    muteBtn.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
   }
 
   volume.addEventListener('input', () => {
     audio.volume = Number(volume.value) / 100;
     audio.muted = audio.volume === 0;
     if (audio.volume > 0) lastVolume = audio.volume;
+    setStoredVolume(volume.value);
     updateMuteButton();
   });
 
@@ -342,16 +368,17 @@ function buildMusicPlayer(article, detail) {
       audio.muted = true;
       volume.value = '0';
     }
+    setStoredVolume(volume.value);
     updateMuteButton();
   });
 
   audio.addEventListener('loadedmetadata', () => {
-    durationLabel.textContent = formatTime(audio.duration);
+    timeLabel.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
   });
 
   audio.addEventListener('timeupdate', () => {
     if (isSeeking) return;
-    currentTimeLabel.textContent = formatTime(audio.currentTime);
+    timeLabel.textContent = `${formatTime(audio.currentTime)} / ${formatTime(audio.duration)}`;
     if (audio.duration) {
       seek.value = String((audio.currentTime / audio.duration) * 1000);
     }
@@ -366,7 +393,7 @@ function buildMusicPlayer(article, detail) {
   seek.addEventListener('input', () => {
     isSeeking = true;
     if (audio.duration) {
-      currentTimeLabel.textContent = formatTime((Number(seek.value) / 1000) * audio.duration);
+      timeLabel.textContent = `${formatTime((Number(seek.value) / 1000) * audio.duration)} / ${formatTime(audio.duration)}`;
     }
   });
 
@@ -378,6 +405,7 @@ function buildMusicPlayer(article, detail) {
   });
 
   loadTrack(0, false);
+  updateMuteButton();
 }
 
 function buildImageCarousel(article, detail) {
