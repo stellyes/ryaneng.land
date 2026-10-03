@@ -1,0 +1,381 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Gated, serverless image conversion tool for ryaneng.land. API Gateway
+  (HTTP API) + Lambda + DynamoDB + S3 + SES. No servers, no always-on cost -- everything
+  is pay-per-request.
+
+  '
+Parameters:
+  SiteOrigin:
+    Type: String
+    Default: https://ryaneng.land
+    Description: Origin allowed to call this API (CORS).
+  ApiDomainName:
+    Type: String
+    Default: api.ryaneng.land
+    Description: Custom domain for the API (required; must have a matching ACM cert
+      and Route53 hosted zone).
+  AcmCertificateArn:
+    Type: String
+    Description: 'ACM certificate ARN (in this API''s region) covering ApiDomainName.
+      Validate it via DNS in ACM first.
+
+      '
+  HostedZoneId:
+    Type: String
+    Description: Route53 hosted zone id for the domain (DNS must be in Route53).
+  SesFromAddress:
+    Type: String
+    Description: Verified SES sender address, e.g. no-reply@ryaneng.land
+  SesToAddress:
+    Type: String
+    Description: Where "request access" emails are delivered, e.g. you@ryaneng.land
+  RecaptchaSiteKey:
+    Type: String
+    Description: Google reCAPTCHA v2 site key (public, goes in the frontend).
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 256
+    Environment:
+      Variables:
+        RATE_LIMIT_TABLE:
+          Ref: RateLimitsTable
+        ACCESS_CODES_TABLE:
+          Ref: AccessCodesTable
+        JOBS_TABLE:
+          Ref: JobsTable
+        UPLOADS_BUCKET:
+          Ref: UploadsBucket
+        OUTPUTS_BUCKET:
+          Ref: OutputsBucket
+        TOKEN_SECRET_PARAM:
+          Ref: TokenSecretParam
+        RECAPTCHA_SECRET_PARAM:
+          Ref: RecaptchaSecretParam
+        DEV_BYPASS_SECRET_PARAM:
+          Ref: DevBypassSecretParam
+        SES_FROM_ADDRESS:
+          Ref: SesFromAddress
+        SES_TO_ADDRESS:
+          Ref: SesToAddress
+Resources:
+  TokenSecretParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: image-converter-token-secret
+      Type: String
+      Value: CHANGE_ME_a_long_random_string
+      Description: HMAC signing secret for session tokens. Overwrite with a real SecureString
+        after deploy.
+  RecaptchaSecretParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: image-converter-recaptcha-secret
+      Type: String
+      Value: CHANGE_ME_recaptcha_secret_key
+      Description: Google reCAPTCHA secret key. Overwrite with a real SecureString
+        after deploy.
+  DevBypassSecretParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: image-converter-dev-bypass-secret
+      Type: String
+      Value: CHANGE_ME_dev_bypass_secret
+      Description: 'Shared secret that lets local testing skip the reCAPTCHA check
+        via an X-Dev-Bypass header. Overwrite with a real random SecureString and
+        never expose it in any file shipped to the browser.
+
+        '
+  AccessCodesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: codeHash
+        AttributeType: S
+      KeySchema:
+      - AttributeName: codeHash
+        KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  RateLimitsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: bucketKey
+        AttributeType: S
+      KeySchema:
+      - AttributeName: bucketKey
+        KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  JobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+      - AttributeName: jobId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: jobId
+        KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+        - Id: ExpireUploadsDaily
+          Status: Enabled
+          ExpirationInDays: 1
+      CorsConfiguration:
+        CorsRules:
+        - AllowedMethods:
+          - PUT
+          AllowedOrigins:
+          - Ref: SiteOrigin
+          AllowedHeaders:
+          - '*'
+  OutputsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+        - Id: ExpireOutputsDaily
+          Status: Enabled
+          ExpirationInDays: 1
+  RequestAccessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      CodeUri: RequestAccessFunction
+      Handler: request_access.app.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RateLimitsTable
+      - SESCrudPolicy:
+          IdentityName:
+            Ref: SesFromAddress
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: RecaptchaSecretParam
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: DevBypassSecretParam
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /request-access
+            Method: POST
+    Metadata:
+      SamResourceId: RequestAccessFunction
+  VerifyAccessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      CodeUri: VerifyAccessFunction
+      Handler: verify_access.app.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RateLimitsTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: AccessCodesTable
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: RecaptchaSecretParam
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: TokenSecretParam
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: DevBypassSecretParam
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /verify
+            Method: POST
+    Metadata:
+      SamResourceId: VerifyAccessFunction
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      CodeUri: GetUploadUrlFunction
+      Handler: get_upload_url.app.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RateLimitsTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: UploadsBucket
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: TokenSecretParam
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /uploads
+            Method: POST
+    Metadata:
+      SamResourceId: GetUploadUrlFunction
+  SubmitJobFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      CodeUri: SubmitJobFunction
+      Handler: submit_job.app.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: RateLimitsTable
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: JobsTable
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: TokenSecretParam
+      - LambdaInvokePolicy:
+          FunctionName:
+            Ref: ConvertWorkerFunction
+      Environment:
+        Variables:
+          CONVERT_WORKER_FUNCTION:
+            Ref: ConvertWorkerFunction
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /convert
+            Method: POST
+    Metadata:
+      SamResourceId: SubmitJobFunction
+  JobStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      CodeUri: JobStatusFunction
+      Handler: job_status.app.handler
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: JobsTable
+      - S3ReadPolicy:
+          BucketName:
+            Ref: OutputsBucket
+      - SSMParameterReadPolicy:
+          ParameterName:
+            Ref: TokenSecretParam
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            ApiId:
+              Ref: HttpApi
+            Path: /jobs/{id}
+            Method: GET
+    Metadata:
+      SamResourceId: JobStatusFunction
+  ConvertWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Timeout: 90
+      MemorySize: 1536
+      EphemeralStorage:
+        Size: 2048
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: JobsTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: UploadsBucket
+      - S3CrudPolicy:
+          BucketName:
+            Ref: OutputsBucket
+      ImageUri: convertworkerfunction:latest
+    Metadata:
+      DockerContext: C:\Users\BHAM CSR\Documents\website\services\image-converter\src
+      Dockerfile: convert_worker/Dockerfile
+      SamResourceId: ConvertWorkerFunction
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+        - Ref: SiteOrigin
+        - http://localhost:5500
+        - http://127.0.0.1:5500
+        AllowMethods:
+        - GET
+        - POST
+        - OPTIONS
+        AllowHeaders:
+        - Content-Type
+        - Authorization
+        - X-Dev-Bypass
+      Domain:
+        DomainName:
+          Ref: ApiDomainName
+        CertificateArn:
+          Ref: AcmCertificateArn
+        Route53:
+          HostedZoneId:
+            Ref: HostedZoneId
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API (use the custom domain instead if configured).
+    Value:
+      Fn::Sub: https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  UploadsBucketName:
+    Value:
+      Ref: UploadsBucket
+  OutputsBucketName:
+    Value:
+      Ref: OutputsBucket
+  AccessCodesTableName:
+    Value:
+      Ref: AccessCodesTable
+  RecaptchaSiteKeyReminder:
+    Description: Put this value into tools/image-converter/app.js (RECAPTCHA_SITE_KEY).
+    Value:
+      Ref: RecaptchaSiteKey

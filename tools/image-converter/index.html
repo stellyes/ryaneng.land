@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Image Converter — Ryan's Code</title>
+    <link rel="stylesheet" href="../../style.css">
+    <link rel="stylesheet" href="../../assets/css/scale.css">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="icon" href="../../favicon.ico" type="image/x-icon">
+    <!-- recaptcha api.js is loaded conditionally by app.js (skipped on localhost, where the site key isn't registered) -->
+  </head>
+  <body>
+    <nav class="side-nav">
+      <a href="../../index.html">
+        <img class="side-nav-deco" src="../../assets/img/deco-left.webp" alt="Watching over us...">
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="side-nav-list">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <ul class="side-nav-list" id="side-nav-list">
+        <li class="home-nav-item"><a href="../../index.html">Home</a></li>
+        <li><a href="../../art.html">The Arts</a></li>
+        <li><a href="../../code.html">The Code</a></li>
+        <li><a href="../../blog.html">The Blog</a></li>
+        <li><a href="../../about.html">About</a></li>
+        <li><a href="../../contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <main>
+      <div class="page-content ic-content">
+        <h1>Image Converter</h1>
+
+        <section id="ic-gate">
+          <p><span class="small-caps">This tool</span> is gated behind an access code to keep hosting costs sane. If you don't have one, request one below.</p>
+
+          <form id="ic-verify-form" class="ic-form">
+            <label for="ic-code">Access code</label>
+            <input id="ic-code" name="code" type="text" autocomplete="off" required>
+
+            <div class="g-recaptcha" data-sitekey="6LdgUdgtAAAAAL4GhtiQ4PAvP_9rPa_WEOfaVX1-" data-callback="icOnVerifyCaptcha"></div>
+
+            <button type="submit" disabled>Unlock</button>
+            <p class="ic-error" id="ic-verify-error" role="alert"></p>
+          </form>
+
+          <details class="ic-request-access">
+            <summary>Request an access code</summary>
+            <form id="ic-request-form" class="ic-form">
+              <label for="ic-name">Name</label>
+              <input id="ic-name" name="name" type="text" required>
+
+              <label for="ic-email">Email</label>
+              <input id="ic-email" name="email" type="email" required>
+
+              <label for="ic-reason">What do you need it for? (optional)</label>
+              <textarea id="ic-reason" name="reason" rows="3"></textarea>
+
+              <!-- honeypot: real users leave this blank -->
+              <input type="text" name="website" class="ic-honeypot" tabindex="-1" autocomplete="off">
+
+              <div class="g-recaptcha" data-sitekey="6LdgUdgtAAAAAL4GhtiQ4PAvP_9rPa_WEOfaVX1-" data-callback="icOnRequestCaptcha"></div>
+
+              <button type="submit" disabled>Send request</button>
+              <p class="ic-error" id="ic-request-error" role="alert"></p>
+              <p class="ic-success" id="ic-request-success" role="status"></p>
+            </form>
+          </details>
+        </section>
+
+        <section id="ic-tool" hidden>
+          <p><span class="small-caps">Pick a file</span> and a target format. Max 25MB. Files and results are deleted automatically within a day.</p>
+
+          <form id="ic-convert-form" class="ic-form">
+            <label for="ic-file">Source file</label>
+            <input id="ic-file" name="file" type="file" required>
+
+            <label for="ic-target">Convert to</label>
+            <select id="ic-target" name="target"></select>
+
+            <button type="submit">Convert</button>
+          </form>
+
+          <div id="ic-status" role="status"></div>
+        </section>
+      </div>
+    </main>
+    <script src="../../nav.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

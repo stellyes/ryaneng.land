@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "image-converter"
+resolve_s3 = true
+s3_prefix = "image-converter"
+region = "us-west-2"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "SiteOrigin=\"https://ryaneng.land\" ApiDomainName=\"api.ryaneng.land\" AcmCertificateArn=\"arn:aws:acm:us-west-2:152353915693:certificate/69e52122-51ed-4921-bca2-5bcff9aa4909\" HostedZoneId=\"Z05716581H90NSUD52SO9\" SesFromAddress=\"ryandengland@gmail.com\" SesToAddress=\"ryandengland@gmail.com\" RecaptchaSiteKey=\"6LdgUdgtAAAAAL4GhtiQ4PAvP_9rPa_WEOfaVX1-\""
+image_repositories = ["ConvertWorkerFunction=152353915693.dkr.ecr.us-west-2.amazonaws.com/imageconverterb8283ef8/convertworkerfunctionb64def8frepo"]
+
+[default.global.parameters]
+region = "us-west-2"

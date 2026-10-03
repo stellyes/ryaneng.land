@@ -1,0 +1,81 @@
+.ic-content {
+    max-width: 640px;
+    text-align: left;
+}
+
+.ic-content h1 {
+    font-family: "Sabbath Black";
+    font-size: 64px;
+    margin-bottom: 1rem;
+}
+
+#ic-tool p {
+    max-width: 640px;
+}
+
+.ic-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+}
+
+.ic-form label {
+    font-weight: bold;
+    font-variant: small-caps;
+}
+
+.ic-form input[type="text"],
+.ic-form input[type="email"],
+.ic-form input[type="file"],
+.ic-form select,
+.ic-form textarea {
+    background-color: rgba(241, 218, 168, 0.08);
+    border: 1px solid rgb(241, 218, 168);
+    color: rgb(241, 218, 168);
+    padding: 0.5rem;
+    font-size: 1rem;
+}
+
+.ic-form button {
+    align-self: flex-start;
+    background-color: rgb(14, 56, 2);
+    border: 1px solid rgb(241, 218, 168);
+    color: rgb(241, 218, 168);
+    padding: 0.5rem 1.25rem;
+    cursor: pointer;
+    font-variant: small-caps;
+}
+
+.ic-form button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ic-honeypot {
+    position: absolute;
+    left: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+
+.ic-error {
+    color: #ff8080;
+    min-height: 1.2em;
+}
+
+.ic-success {
+    color: #a8ffb0;
+}
+
+.ic-request-access summary {
+    cursor: pointer;
+    font-variant: small-caps;
+    font-weight: bold;
+}
+
+#ic-status {
+    margin-top: 1rem;
+    min-height: 1.5em;
+}

@@ -1,0 +1,19 @@
+const churchImages = [
+  './assets/img/church/angel.webp',
+  './assets/img/church/hourglass.webp',
+  './assets/img/church/love-letter.webp'
+];
+
+const churchImage = document.querySelector('.church-image');
+const randomizeButton = document.querySelector('#church-randomize');
+
+function showRandomChurchImage() {
+  const currentImage = churchImage.getAttribute('src');
+  const availableImages = churchImages.filter((image) => image !== currentImage);
+  const randomIndex = Math.floor(Math.random() * availableImages.length);
+
+  churchImage.src = availableImages[randomIndex];
+}
+
+randomizeButton.addEventListener('click', showRandomChurchImage);
+showRandomChurchImage();
