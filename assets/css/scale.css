@@ -46,7 +46,7 @@
         height: 64px;
         padding: 16px;
         background-color: rgba(0, 0, 0, 0.95);
-        border: 1px solid rgb(241, 218, 168);
+        border: 1px solid #f1daa8;
     }
 
     ul.side-nav-list {
@@ -148,17 +148,12 @@
         font-size: 1em;
     }
 
-
-    .page-content .blog-list {
+    .page-content .post-list {
         width: 100%;
     }
 
-    .blog-list-item {
-        gap: 0.5em;
-    }
-
-    .blog-list-title {
-        font-size: 1.6em;
+    .post-list-title {
+        font-size: 2.6em;
         text-align: right;
     }
 
@@ -177,27 +172,15 @@
         width: 100%;
     }
 
+    .post-list-date,
     .blog-post-date {
         align-self: flex-end;
-        font-size: 0.8em;
+        font-size: 1em;
     }
 
     .blog-post-body ul,
     .blog-post-body ol {
         font-size: 1.1em;
-    }
-
-    .page-content .art-list {
-        width: 100%;
-    }
-
-    .art-list-item {
-        gap: 0.5em;
-    }
-
-    .art-list-title {
-        font-size: 1.6em;
-        text-align: right;
     }
 
     .art-back-link {

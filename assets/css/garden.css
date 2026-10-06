@@ -1,0 +1,82 @@
+.page-content.garden-content {
+    width: min(76rem, calc(100vw - var(--nav-width) - 3rem));
+    max-width: none;
+    box-sizing: border-box;
+    padding: clamp(1.25rem, 3vw, 3rem);
+}
+
+.garden {
+    margin-top: 1.5rem;
+}
+
+.garden-back-link {
+    display: inline-block;
+    font-size: 1.25rem;
+}
+
+.garden-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.page-content .garden-toolbar h1 {
+    font-family: 'Sabbath Black';
+    font-size: clamp(2rem, 4vw, 3.5rem);
+    width: auto;
+    text-align: left;
+}
+
+#garden-reset {
+    padding: 0.7em 1em;
+    min-height: 44px;
+    border: 1px solid rgb(241, 218, 168);
+    background: rgb(14, 56, 2);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+#garden-reset:hover {
+    background: rgb(241, 218, 168);
+    color: black;
+}
+
+#garden-reset:focus-visible,
+#garden-canvas:focus-visible {
+    outline: 3px solid rgb(241, 218, 168);
+    outline-offset: 4px;
+}
+
+.page-content .garden p {
+    width: auto;
+    font-size: 1rem;
+    line-height: 1.6;
+    margin: 1rem 0;
+}
+
+.garden-canvas-wrap {
+    height: clamp(32rem, 75vh, 56rem);
+    border: 1px solid rgba(241, 218, 168, 0.5);
+    background: radial-gradient(ellipse at bottom, #12291b, #050a08 75%);
+}
+
+#garden-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    touch-action: pan-y;
+    cursor: crosshair;
+}
+
+@media (max-width: 767px) {
+    .page-content.garden-content {
+        width: calc(100% - 2rem);
+    }
+
+    .garden-canvas-wrap {
+        height: 65vh;
+        min-height: 24rem;
+    }
+}

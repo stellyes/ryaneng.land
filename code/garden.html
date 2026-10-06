@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ryan's Garden</title>
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../assets/css/scale.css">
+    <link rel="stylesheet" href="../assets/css/garden.css">
+    <link rel="icon" href="../favicon.ico" type="image/x-icon">
+  </head>
+  <body>
+    <nav class="side-nav">
+      <a href="../index.html">
+        <img class="side-nav-deco" src="../assets/img/deco-left.webp" alt="Watching over us...">
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="side-nav-list">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <ul class="side-nav-list" id="side-nav-list">
+        <li class="home-nav-item"><a href="../index.html">Home</a></li>
+        <li><a href="../art.html">The Arts</a></li>
+        <li><a href="../code.html">The Code</a></li>
+        <li><a href="../blog.html">The Blog</a></li>
+        <li><a href="../about.html">About</a></li>
+        <li><a href="../contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <main>
+      <div class="page-content garden-content">
+        <a class="garden-back-link" href="../code.html">&larr; Back to Code</a>
+        <section class="garden" aria-labelledby="garden-title">
+          <div class="garden-toolbar">
+            <h1 id="garden-title">The Garden</h1>
+            <button id="garden-reset" type="button" aria-controls="garden-canvas">Reset garden</button>
+          </div>
+          <p id="garden-help">Touch the garden. You are the acting sun that bends the growth.</p>
+          <div class="garden-canvas-wrap">
+            <canvas id="garden-canvas" tabindex="0" aria-label="Interactive generative garden" aria-describedby="garden-help garden-status">
+              Your browser does not support the canvas needed for this garden.
+            </canvas>
+          </div>
+          <p id="garden-status" role="status" aria-live="polite">Preparing the garden.</p>
+          <noscript><p>Enable JavaScript to grow the garden.</p></noscript>
+        </section>
+      </div>
+    </main>
+    <script src="../nav.js"></script>
+    <script src="../assets/js/garden.js"></script>
+  </body>
+</html>

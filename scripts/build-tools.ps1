@@ -32,12 +32,12 @@ if ($PublishDirectory) {
     if ($destination -eq $root) { throw 'PublishDirectory must differ from the repository root.' }
     New-Item -ItemType Directory -Path $destination -Force | Out-Null
     Get-ChildItem $root -File | Where-Object { $_.Extension -in '.html', '.css', '.js', '.ico' -or $_.Name -eq 'CNAME' } | Copy-Item -Destination $destination
-    foreach ($folder in 'assets', 'tools') {
+    foreach ($folder in 'assets', 'tools', 'code') {
         Copy-Item (Join-Path $root $folder) -Destination $destination -Recurse -Force
     }
 }
 $publicConfiguration = @{
-    apiUrl = $env:IMAGE_TOOLS_API_URL.TrimEnd('/')
+    apiUrl           = $env:IMAGE_TOOLS_API_URL.TrimEnd('/')
     recaptchaSiteKey = $env:RECAPTCHA_SITE_KEY
 } | ConvertTo-Json -Compress
 $configurationPath = Join-Path $destination 'tools/image-config.js'

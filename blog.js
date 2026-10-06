@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!container) return;
 
   const slug = new URLSearchParams(window.location.search).get('post');
+  const sectionHeader = document.querySelector('.section-header');
+  if (sectionHeader) sectionHeader.hidden = Boolean(slug);
 
   let posts;
   try {
@@ -195,24 +197,24 @@ function renderInlineMarkdown(text, converter) {
 
 function renderPostList(container, posts) {
   const list = document.createElement('ul');
-  list.className = 'blog-list';
+  list.className = 'post-list';
 
   posts
     .slice()
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .forEach((post) => {
       const item = document.createElement('li');
-      item.className = 'blog-list-item';
+      item.className = 'post-list-item';
 
       const link = document.createElement('a');
       link.href = `./blog.html?post=${encodeURIComponent(post.slug)}`;
-      link.className = 'blog-list-title';
+      link.className = 'post-list-title';
       link.textContent = post.title;
       item.appendChild(link);
 
       if (post.date) {
         const time = document.createElement('time');
-        time.className = 'blog-post-date';
+        time.className = 'post-list-date';
         time.dateTime = post.date;
         time.textContent = post.date;
         item.appendChild(time);
@@ -220,7 +222,7 @@ function renderPostList(container, posts) {
 
       if (post.preview) {
         const preview = document.createElement('p');
-        preview.className = 'blog-list-preview';
+        preview.className = 'post-list-preview';
         preview.textContent = post.preview;
         item.appendChild(preview);
       }

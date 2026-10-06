@@ -3,6 +3,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (!container) return;
 
   const slug = new URLSearchParams(window.location.search).get('post');
+  const sectionHeader = document.querySelector('.section-header');
+  if (sectionHeader) sectionHeader.hidden = Boolean(slug);
 
   let posts;
   try {
@@ -25,11 +27,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
-const TYPE_ICONS = {
-  music: { src: './assets/img/sound-icon.webp', alt: 'Music post' },
-  visual: { src: './assets/img/visual-icon.webp', alt: 'Visual art post' },
-};
-
 function renderPostList(container, posts) {
   if (!posts.length) {
     const empty = document.createElement('p');
@@ -40,37 +37,25 @@ function renderPostList(container, posts) {
   }
 
   const list = document.createElement('ul');
-  list.className = 'art-list';
+  list.className = 'post-list';
 
   posts
     .slice()
     .sort((a, b) => (a.date < b.date ? 1 : -1))
     .forEach((post) => {
       const item = document.createElement('li');
-      item.className = 'art-list-item';
+      item.className = 'post-list-item';
 
       const link = document.createElement('a');
       link.href = `./art.html?post=${encodeURIComponent(post.slug)}`;
-      link.className = 'art-list-title';
-
-      const icon = TYPE_ICONS[post.type];
-      if (icon) {
-        const iconImg = document.createElement('img');
-        iconImg.className = 'art-list-icon';
-        iconImg.src = icon.src;
-        iconImg.alt = icon.alt;
-        link.appendChild(iconImg);
-      }
-
-      const titleSpan = document.createElement('span');
-      titleSpan.textContent = post.title;
-      link.appendChild(titleSpan);
+      link.className = 'post-list-title';
+      link.textContent = post.title;
 
       item.appendChild(link);
 
       if (post.date) {
         const time = document.createElement('time');
-        time.className = 'art-post-date';
+        time.className = 'post-list-date';
         time.dateTime = post.date;
         time.textContent = post.date;
         item.appendChild(time);
@@ -78,7 +63,7 @@ function renderPostList(container, posts) {
 
       if (post.preview) {
         const preview = document.createElement('p');
-        preview.className = 'art-list-preview';
+        preview.className = 'post-list-preview';
         preview.textContent = post.preview;
         item.appendChild(preview);
       }
