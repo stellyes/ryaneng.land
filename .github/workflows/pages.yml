@@ -1,0 +1,32 @@
+name: Publish Website
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - name: Build Public Site
+        shell: pwsh
+        env:
+          IMAGE_TOOLS_API_URL: ${{ vars.IMAGE_TOOLS_API_URL }}
+          RECAPTCHA_SITE_KEY: ${{ vars.RECAPTCHA_SITE_KEY }}
+        run: ./scripts/build-tools.ps1 -PublishDirectory "$env:RUNNER_TEMP/public-site"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/public-site
+      - uses: actions/deploy-pages@v4
+        id: deployment

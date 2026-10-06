@@ -6,13 +6,14 @@ Returns job status, and a short-lived presigned download URL once done.
 import os
 
 import boto3
+from botocore.config import Config
 
 from common import responses
 from common.auth import require_session
 
 _ssm = boto3.client("ssm")
 _dynamodb = boto3.resource("dynamodb")
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 
 
 def handler(event, context):
@@ -28,6 +29,8 @@ def handler(event, context):
     item = jobs_table.get_item(Key={"jobId": job_id}).get("Item")
     if not item:
         return responses.bad_request("Unknown job id.")
+    if item.get("codeHash") != payload["ch"]:
+        return responses.unauthorized("That job does not belong to this session.")
 
     result = {"status": item["status"]}
 

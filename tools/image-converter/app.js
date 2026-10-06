@@ -1,9 +1,7 @@
-// ---- Configuration: fill these in after deploying services/image-converter ----
-const API_BASE_URL = "https://api.ryaneng.land";
-// NOTE: the reCAPTCHA site key also needs to be set directly in index.html's
-// two data-sitekey attributes (Google's widget reads it from the HTML, not JS).
-const RECAPTCHA_SITE_KEY = "6LdgUdgtAAAAAL4GhtiQ4PAvP_9rPa_WEOfaVX1-";
-// --------------------------------------------------------------------------
+const configuration = window.IMAGE_TOOLS_CONFIG || {};
+const API_BASE_URL = configuration.apiUrl;
+const RECAPTCHA_SITE_KEY = configuration.recaptchaSiteKey;
+const IMAGE_OPERATION = document.body.dataset.imageOperation || "convert";
 
 // Keep in sync with services/image-converter/src/common/formats.py
 const TARGET_FORMATS = [
@@ -25,19 +23,16 @@ function getDevBypassSecret() {
   return isLocalhost() ? localStorage.getItem(DEV_BYPASS_STORAGE_KEY) : null;
 }
 
-// The registered reCAPTCHA site key doesn't cover localhost, so loading the
-// widget there only ever shows an error box -- skip it and rely on the
-// dev-bypass secret (see getDevBypassSecret) for local testing instead.
-if (!isLocalhost()) {
-  const script = document.createElement("script");
-  script.src = "https://www.google.com/recaptcha/api.js";
-  script.async = true;
-  script.defer = true;
-  document.head.appendChild(script);
-}
-
 let verifyCaptchaToken = null;
 let requestCaptchaToken = null;
+const captchaWidgets = {};
+
+function resetCaptcha(formId) {
+  if (window.grecaptcha && captchaWidgets[formId] !== undefined) {
+    window.grecaptcha.reset(captchaWidgets[formId]);
+  }
+  document.querySelector(`#${formId} button`).disabled = !getDevBypassSecret();
+}
 
 function icOnVerifyCaptcha(token) {
   verifyCaptchaToken = token;
@@ -75,7 +70,8 @@ function showTool() {
   const toolSection = document.getElementById("ic-tool");
   toolSection.hidden = false;
   const select = document.getElementById("ic-target");
-  select.innerHTML = TARGET_FORMATS.map((f) => `<option value="${f}">${f}</option>`).join("");
+  const formats = IMAGE_OPERATION === "optimize" ? ["webp"] : TARGET_FORMATS;
+  select.replaceChildren(...formats.map((format) => new Option(format.toUpperCase(), format)));
 }
 
 async function apiFetch(path, options = {}) {
@@ -91,6 +87,10 @@ async function apiFetch(path, options = {}) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  if (!API_BASE_URL || !RECAPTCHA_SITE_KEY) {
+    document.getElementById("ic-verify-error").textContent = "Image tools are temporarily unavailable.";
+    return;
+  }
   if (getStoredToken()) showTool();
 
   if (isLocalhost()) {
@@ -102,6 +102,29 @@ document.addEventListener("DOMContentLoaded", () => {
   if (getDevBypassSecret()) {
     document.querySelector("#ic-verify-form button").disabled = false;
     document.querySelector("#ic-request-form button").disabled = false;
+  }
+
+  if (!isLocalhost()) {
+    window.icRenderCaptcha = () => {
+      for (const [formId, callback] of [
+        ["ic-verify-form", icOnVerifyCaptcha],
+        ["ic-request-form", icOnRequestCaptcha],
+      ]) {
+        captchaWidgets[formId] = window.grecaptcha.render(
+          document.querySelector(`#${formId} .g-recaptcha`),
+          {
+            sitekey: RECAPTCHA_SITE_KEY,
+            callback,
+            "expired-callback": () => resetCaptcha(formId),
+            "error-callback": () => resetCaptcha(formId),
+          }
+        );
+      }
+    };
+    const script = document.createElement("script");
+    script.src = "https://www.google.com/recaptcha/api.js?onload=icRenderCaptcha&render=explicit";
+    script.async = true;
+    document.head.appendChild(script);
   }
 
   document.getElementById("ic-verify-form").addEventListener("submit", async (event) => {
@@ -119,9 +142,8 @@ document.addEventListener("DOMContentLoaded", () => {
       showTool();
     } catch (err) {
       errorEl.textContent = err.message;
-      if (window.grecaptcha) window.grecaptcha.reset();
       verifyCaptchaToken = null;
-      document.querySelector("#ic-verify-form button").disabled = true;
+      resetCaptcha("ic-verify-form");
     }
   });
 
@@ -134,10 +156,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const form = event.target;
     const payload = {
-      name: form.name.value.trim(),
-      email: form.email.value.trim(),
-      reason: form.reason.value.trim(),
-      website: form.website.value, // honeypot, should stay empty
+      name: form.elements.namedItem("name").value.trim(),
+      email: form.elements.namedItem("email").value.trim(),
+      reason: form.elements.namedItem("reason").value.trim(),
+      website: form.elements.namedItem("website").value,
       captchaToken: requestCaptchaToken,
     };
 
@@ -148,9 +170,8 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (err) {
       errorEl.textContent = err.message;
     } finally {
-      if (window.grecaptcha) window.grecaptcha.reset();
       requestCaptchaToken = null;
-      document.querySelector("#ic-request-form button").disabled = true;
+      resetCaptcha("ic-request-form");
     }
   });
 
@@ -162,6 +183,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const file = fileInput.files[0];
 
     if (!file) return;
+    const submitButton = event.target.querySelector("button");
+    submitButton.disabled = true;
 
     try {
       statusEl.textContent = "Requesting upload URL…";
@@ -182,22 +205,29 @@ document.addEventListener("DOMContentLoaded", () => {
       statusEl.textContent = "Converting…";
       const { jobId } = await apiFetch("/convert", {
         method: "POST",
-        body: JSON.stringify({ key, targetFormat }),
+        body: JSON.stringify({ key, targetFormat, operation: IMAGE_OPERATION }),
       });
 
       await pollJob(jobId, statusEl);
     } catch (err) {
       statusEl.textContent = `Error: ${err.message}`;
+    } finally {
+      submitButton.disabled = false;
     }
   });
 });
 
 async function pollJob(jobId, statusEl) {
-  const maxAttempts = 30;
+  const maxAttempts = 90;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const result = await apiFetch(`/jobs/${jobId}`);
     if (result.status === "DONE") {
-      statusEl.innerHTML = `Done! <a href="${result.downloadUrl}">Download result</a>`;
+      const link = document.createElement("a");
+      link.href = result.downloadUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "Download result";
+      statusEl.replaceChildren(document.createTextNode("Done! "), link);
       return;
     }
     if (result.status === "ERROR") {

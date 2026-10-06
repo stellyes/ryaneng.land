@@ -34,6 +34,11 @@ def handler(event, context):
 
     key = (body.get("key") or "").strip()
     target_format = (body.get("targetFormat") or "").strip().lower()
+    operation = body.get("operation", "convert")
+    if operation not in {"convert", "optimize"}:
+        return responses.bad_request("Unknown image operation.")
+    if operation == "optimize":
+        target_format = "webp"
 
     # The uploaded key is namespaced with the caller's own code hash; refuse
     # to convert anything outside that namespace.
@@ -56,6 +61,7 @@ def handler(event, context):
     jobs_table.put_item(
         Item={
             "jobId": job_id,
+            "codeHash": payload["ch"],
             "status": "PENDING",
             "createdAt": int(time.time()),
             "expiresAt": int(time.time()) + 86400,
@@ -70,6 +76,7 @@ def handler(event, context):
                 "jobId": job_id,
                 "sourceKey": key,
                 "targetFormat": target_format,
+                "operation": operation,
             }
         ).encode("utf-8"),
     )

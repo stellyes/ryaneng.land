@@ -1,7 +1,8 @@
 const churchImages = [
   './assets/img/church/angel.webp',
   './assets/img/church/hourglass.webp',
-  './assets/img/church/love-letter.webp'
+  './assets/img/church/love-letter.webp',
+  './assets/img/church/blessed-is-the-machine.webp'
 ];
 
 const churchImage = document.querySelector('.church-image');

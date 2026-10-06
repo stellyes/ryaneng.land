@@ -68,5 +68,60 @@
                 "summary": "The instrumental version of 'KICK IT TO THE RIGHT SIDE'."
             }
         ]
+    },
+    {
+        "slug": "take-the-glory",
+        "title": "Take the Glory: The Series",
+        "date": "2026-10-05",
+        "type": "visual",
+        "preview": "Would you be able to differentiate real vs. fake propaganda if it were shown to you side-by-side? The answer is likely not.",
+        "summary": "Would you be able to differentiate real vs. fake propaganda if it were shown to you side-by-side? The answer is likely not. Take the Glory is a synthetically patriotic take on propaganda and its use in post-war society. Depicted is an androgynous face that's skewed by haze, flattened into a black and white rendering. Postured to be serious, sultry, and a careful amount of ambiguity, the viewer should be left wondering, have they secured their future and taken the glory while they had the opportunity? Different stylistic renderings are for different theoretical, real-world placements.",
+        "images": [
+            {
+                "file": "./assets/art-posts/images/take-the-glory/original.webp",
+                "alt": "Original B&W rendering of the Take the Glory poster",
+                "summary": "Original B&W rendering of the Take the Glory poster"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/light-blue.webp",
+                "alt": "Light blue rendering of the Take the Glory poster",
+                "summary": "Light blue rendering of the Take the Glory poster"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/dark-blue.webp",
+                "alt": "Dark blue rendering of the Take the Glory poster",
+                "summary": "Dark blue rendering of the Take the Glory poster"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/city.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a cityscape background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a cityscape background"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/garden.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a garden background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a garden background"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/flower.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a flowerbed background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a flowerbed background"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/painted.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a painted background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a painted background"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/skyscraper.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a skyscraper background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a skyscraper background"
+            },
+            {
+                "file": "./assets/art-posts/images/take-the-glory/sunset.webp",
+                "alt": "Transparent rendering of the Take the Glory poster, with a sunset background",
+                "summary": "Transparent rendering of the Take the Glory poster, with a sunset background"
+            }
+        ]
     }
 ]

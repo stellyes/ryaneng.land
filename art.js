@@ -413,61 +413,157 @@ function buildImageCarousel(article, detail) {
   if (!images.length) return;
 
   let imageIndex = 0;
+  const mobileView = window.matchMedia('(max-width: 767px)');
+
+  const layout = document.createElement('div');
+  layout.className = 'art-carousel-layout';
+
+  const prevButton = document.createElement('button');
+  prevButton.type = 'button';
+  prevButton.className = 'art-carousel-arrow art-carousel-prev';
+  prevButton.setAttribute('aria-label', 'Previous image');
+  prevButton.title = 'Previous image';
+  prevButton.textContent = '\u2190';
+
+  const nextButton = document.createElement('button');
+  nextButton.type = 'button';
+  nextButton.className = 'art-carousel-arrow art-carousel-next';
+  nextButton.setAttribute('aria-label', 'Next image');
+  nextButton.title = 'Next image';
+  nextButton.textContent = '\u2192';
 
   const carousel = document.createElement('div');
   carousel.className = 'art-carousel';
+  carousel.setAttribute('aria-label', 'Artwork gallery');
+  carousel.setAttribute('role', 'region');
 
-  const prevBtn = document.createElement('button');
-  prevBtn.type = 'button';
-  prevBtn.className = 'art-carousel-arrow art-carousel-prev';
-  prevBtn.setAttribute('aria-label', 'Previous image');
-  prevBtn.textContent = '\u2190';
+  const slides = images.map((image, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'art-carousel-image-wrap';
+    button.setAttribute('aria-label', `View full-size image ${index + 1} of ${images.length}`);
+    const img = document.createElement('img');
+    img.className = 'art-carousel-image';
+    img.src = image.file;
+    img.alt = image.alt || detail.title;
+    img.addEventListener('load', () => {
+      if (index === imageIndex) updateHeight();
+    });
+    button.appendChild(img);
+    carousel.appendChild(button);
+    return button;
+  });
 
-  const imageWrap = document.createElement('div');
-  imageWrap.className = 'art-carousel-image-wrap';
+  const lightbox = document.createElement('dialog');
+  lightbox.className = 'art-lightbox';
+  lightbox.setAttribute('aria-label', 'Full-size artwork');
 
-  const img = document.createElement('img');
-  img.className = 'art-carousel-image';
-  imageWrap.appendChild(img);
+  const fullImage = document.createElement('img');
+  fullImage.className = 'art-lightbox-image';
 
-  const nextBtn = document.createElement('button');
-  nextBtn.type = 'button';
-  nextBtn.className = 'art-carousel-arrow art-carousel-next';
-  nextBtn.setAttribute('aria-label', 'Next image');
-  nextBtn.textContent = '\u2192';
+  const closeButton = document.createElement('button');
+  closeButton.type = 'button';
+  closeButton.className = 'art-lightbox-close';
+  closeButton.textContent = '\u00D7';
+  closeButton.setAttribute('aria-label', 'Close image');
+  closeButton.title = 'Close image';
+  lightbox.append(fullImage, closeButton);
+  article.appendChild(lightbox);
+
+  slides.forEach((button) => {
+    button.addEventListener('click', () => {
+      if (!mobileView.matches) return;
+      const img = button.querySelector('img');
+      fullImage.src = img.src;
+      fullImage.alt = img.alt;
+      lightbox.showModal();
+      document.body.classList.add('art-lightbox-open');
+    });
+  });
+  closeButton.addEventListener('click', () => lightbox.close());
+  lightbox.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      lightbox.close();
+    }
+  });
+  lightbox.addEventListener('click', (event) => {
+    if (event.target === lightbox) lightbox.close();
+  });
+  lightbox.addEventListener('close', () => {
+    document.body.classList.remove('art-lightbox-open');
+    slides[imageIndex].focus({ preventScroll: true });
+  });
 
   if (images.length > 1) {
-    carousel.append(prevBtn, imageWrap, nextBtn);
+    layout.append(prevButton, carousel, nextButton);
   } else {
-    carousel.append(imageWrap);
+    layout.appendChild(carousel);
   }
-
-  article.appendChild(carousel);
+  article.appendChild(layout);
 
   const imageSummary = document.createElement('div');
   imageSummary.className = 'art-carousel-summary';
+  imageSummary.setAttribute('aria-live', 'polite');
   article.appendChild(imageSummary);
+
+  function updateHeight() {
+    const img = slides[imageIndex].querySelector('img');
+    if (!img.naturalWidth || !carousel.clientWidth) return;
+    const limit = window.innerHeight * (mobileView.matches ? 0.5 : 0.9);
+    carousel.style.height = `${Math.min(limit, carousel.clientWidth * img.naturalHeight / img.naturalWidth)}px`;
+  }
 
   function render() {
     const image = images[imageIndex];
-    img.src = image.file;
-    img.alt = image.alt || detail.title;
+    slides.forEach((button, index) => {
+      button.classList.toggle('is-active', index === imageIndex);
+      button.disabled = !mobileView.matches;
+    });
+    prevButton.disabled = imageIndex === 0;
+    nextButton.disabled = imageIndex === images.length - 1;
     imageSummary.innerHTML = image.summary ? renderMarkdown(image.summary) : '';
-    prevBtn.disabled = imageIndex === 0;
-    nextBtn.disabled = imageIndex === images.length - 1;
+    updateHeight();
   }
 
-  prevBtn.addEventListener('click', () => {
+  prevButton.addEventListener('click', () => {
     if (imageIndex === 0) return;
     imageIndex--;
     render();
   });
-
-  nextBtn.addEventListener('click', () => {
+  nextButton.addEventListener('click', () => {
     if (imageIndex === images.length - 1) return;
     imageIndex++;
     render();
   });
+  carousel.addEventListener('scroll', () => {
+    if (!mobileView.matches) return;
+    const index = Math.round(carousel.scrollLeft / carousel.clientWidth);
+    if (index >= 0 && index < images.length && index !== imageIndex) {
+      imageIndex = index;
+      render();
+    }
+  });
+  carousel.addEventListener('keydown', (event) => {
+    if (!mobileView.matches) return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    imageIndex = Math.max(0, Math.min(images.length - 1, imageIndex + (event.key === 'ArrowRight' ? 1 : -1)));
+    carousel.scrollTo({ left: imageIndex * carousel.clientWidth });
+    slides[imageIndex].focus({ preventScroll: true });
+    render();
+  });
+  new ResizeObserver(() => {
+    updateHeight();
+    carousel.scrollLeft = mobileView.matches ? imageIndex * carousel.clientWidth : 0;
+  }).observe(carousel);
+  function updateView() {
+    if (!mobileView.matches && lightbox.open) lightbox.close();
+    render();
+    carousel.scrollLeft = mobileView.matches ? imageIndex * carousel.clientWidth : 0;
+  }
+  mobileView.addEventListener('change', updateView);
+  window.addEventListener('resize', updateView);
 
   render();
 }

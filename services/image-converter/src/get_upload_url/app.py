@@ -12,13 +12,14 @@ import os
 import uuid
 
 import boto3
+from botocore.config import Config
 
 from common import ratelimit, responses
 from common.auth import require_session
 from common.formats import MAX_UPLOAD_BYTES, is_valid_source
 
 _ssm = boto3.client("ssm")
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=Config(signature_version="s3v4"))
 
 
 def handler(event, context):

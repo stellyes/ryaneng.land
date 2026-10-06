@@ -7,10 +7,12 @@ after reviewing the email, which is the "low-tech but robust" design the
 owner asked for (no automated code issuance to abuse).
 """
 import json
+import logging
 import os
 import re
 
 import boto3
+from botocore.exceptions import ClientError
 
 from common import ratelimit, responses
 from common.recaptcha import verify_recaptcha
@@ -18,6 +20,7 @@ from common.devbypass import is_dev_bypass
 
 _ssm = boto3.client("ssm")
 _ses = boto3.client("ses")
+_logger = logging.getLogger(__name__)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -63,23 +66,27 @@ def handler(event, context):
     ):
         return responses.too_many_requests()
 
-    _ses.send_email(
-        Source=os.environ["SES_FROM_ADDRESS"],
-        Destination={"ToAddresses": [os.environ["SES_TO_ADDRESS"]]},
-        ReplyToAddresses=[email],
-        Message={
-            "Subject": {"Data": f"Image converter access request from {name}"},
-            "Body": {
-                "Text": {
-                    "Data": (
-                        f"Name: {name}\n"
-                        f"Email: {email}\n"
-                        f"Source IP: {source_ip}\n\n"
-                        f"Message:\n{reason or '(none provided)'}"
-                    )
-                }
+    try:
+        _ses.send_email(
+            Source=os.environ["SES_FROM_ADDRESS"],
+            Destination={"ToAddresses": [os.environ["SES_TO_ADDRESS"]]},
+            ReplyToAddresses=[email],
+            Message={
+                "Subject": {"Data": f"Image converter access request from {name}"},
+                "Body": {
+                    "Text": {
+                        "Data": (
+                            f"Name: {name}\n"
+                            f"Email: {email}\n"
+                            f"Source IP: {source_ip}\n\n"
+                            f"Message:\n{reason or '(none provided)'}"
+                        )
+                    }
+                },
             },
-        },
-    )
+        )
+    except ClientError as error:
+        _logger.warning("Access request delivery failed: %s", error.response["Error"]["Code"])
+        return responses.response(503, {"error": "Access requests are temporarily unavailable. Please try again later."})
 
     return responses.ok({"message": "Thanks! Your request has been sent."})

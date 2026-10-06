@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+**/.aws-sam/
+**/samconfig.toml
+**/__pycache__/
+**/*.pyc
+tools/image-config.js
+_site/

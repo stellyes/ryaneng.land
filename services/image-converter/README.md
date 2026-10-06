@@ -1,16 +1,17 @@
 # Image Converter — serverless backend
 
-Gated image conversion tool for ryaneng.land. Entirely serverless (API
-Gateway HTTP API + Lambda + DynamoDB + S3 + SES) — nothing runs, and nothing
-is billed, when nobody is using it. Realistic monthly cost at low volume:
-**$0–$1** (all four services have an always-free tier at this scale; the one
-thing that isn't literally $0 is the handful of cents per GB-second the
-container Lambda uses while actively converting a file).
+Gated image conversion and optimization using API Gateway, Lambda, DynamoDB,
+S3, and SES. Both tools share the access gate, quotas, buckets, and worker.
+The optimizer outputs WebP at quality 80, strips metadata, applies EXIF
+orientation, and scales the longest edge to exactly 1080px without cropping.
+Smaller inputs are upscaled. Animated or multi-page inputs use their first frame.
+Costs depend on usage, storage, registry images, DNS, and account free-tier eligibility;
+zero cost is not guaranteed.
 
 ## Architecture
 
 ```
-Browser (tools/image-converter on ryaneng.land)
+Browser (image-converter or image-optimizer)
    │
    │ 1. solve reCAPTCHA + enter access code
    ▼
@@ -72,45 +73,32 @@ Separately: POST /request-access ─► request_access Lambda ─► SES email t
 ## Prerequisites
 
 - AWS account, [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html), Docker (for the container-image Lambda build).
-- A [Google reCAPTCHA v2 ("I'm not a robot" checkbox)](https://www.google.com/recaptcha/admin/create) site/secret key pair for `ryaneng.land`.
+- A [Google reCAPTCHA v2 ("I'm not a robot" checkbox)](https://www.google.com/recaptcha/admin/create) key pair for your site domain.
 - An SES-verified sender identity (domain or single address) and a verified
   recipient address if your SES account is still in sandbox mode. To send
   from/to arbitrary addresses, request SES production access first.
-- If using the custom domain `api.ryaneng.land`: an ACM certificate for that
-  name in the same region you deploy to, validated via DNS.
+- An ACM certificate for your API domain in the deployment region, validated
+  via DNS, and a Route53 hosted zone for that domain.
 
 ## Deploy
 
+Copy the root `.env.example` to `.env` and fill in your deployment values.
+The local `.env`, SAM config, build artifacts, and generated browser config are
+ignored by Git. AWS credentials stay in your AWS CLI login, not in the repository.
+
 ```powershell
-cd services/image-converter
-sam build
-sam deploy --guided
+./scripts/deploy-image-tools.ps1
 ```
 
-When prompted, supply:
-
-- `SiteOrigin` — `https://ryaneng.land`
-- `ApiDomainName` — `api.ryaneng.land` (or leave blank to skip the custom domain and use the default `*.execute-api.*.amazonaws.com` URL)
-- `AcmCertificateArn` — required if you set a custom domain
-- `HostedZoneId` — only if `ryaneng.land`'s DNS is in Route53; otherwise leave blank and add the CNAME/A-alias manually using the value `sam deploy` prints out
-- `SesFromAddress`, `SesToAddress`
-- `RecaptchaSiteKey` — the public site key (the secret key is set separately, below)
-
-If your DNS is **not** in Route53 (e.g. Namecheap/Cloudflare, which is common
-alongside a GitHub Pages `CNAME` file like this repo has), leave
-`HostedZoneId` blank and manually create the DNS record API Gateway's console
-shows you for the custom domain, plus SES's DKIM CNAME records for domain
-verification.
+Docker Desktop must be running. Deployment stops if the build fails.
+Secret values belong in SSM SecureString parameters, never in browser config.
 
 ### After the first deploy: set the real secrets
 
-The template seeds two SSM parameters with placeholder values so the stack
-deploys cleanly; overwrite them for real immediately after:
-
-```powershell
-aws ssm put-parameter --name image-converter-token-secret --type SecureString --overwrite --value "$(python -c 'import secrets;print(secrets.token_urlsafe(32))')"
-aws ssm put-parameter --name image-converter-recaptcha-secret --type SecureString --overwrite --value "<your reCAPTCHA secret key>"
-```
+The template creates placeholder parameters on first deploy. Set real values in
+SSM SecureString for `image-converter-token-secret`, `image-converter-recaptcha-secret`,
+and (only for local testing) `image-converter-dev-bypass-secret`. Never use the
+placeholder values. Subsequent deployments should not overwrite real secrets.
 
 ### Issue an access code
 
@@ -125,14 +113,22 @@ no automated code delivery.
 
 ## Frontend wiring
 
-After deploy, edit [tools/image-converter/app.js](../../tools/image-converter/app.js) and set:
-
-```js
-const API_BASE_URL = "https://api.ryaneng.land"; // or the default execute-api URL
-const RECAPTCHA_SITE_KEY = "<your reCAPTCHA site key>";
+From the repository root:
+```powershell
+./scripts/build-tools.ps1
 ```
 
-Also replace both `RECAPTCHA_SITE_KEY_PLACEHOLDER` occurrences in
-[tools/image-converter/index.html](../../tools/image-converter/index.html)
-(`data-sitekey` attributes) — Google's widget reads the key straight from the
-HTML, not from JS.
+This generates ignored `tools/image-config.js` containing ONLY `IMAGE_TOOLS_API_URL`
+and `RECAPTCHA_SITE_KEY`. Those values are necessarily visible to visitors; they
+are not credentials. No signing secrets, reCAPTCHA secret, bypass secret, AWS
+account IDs, or email addresses are included.
+
+For GitHub Pages, select **GitHub Actions** as the publishing source and set
+repository Actions variables `IMAGE_TOOLS_API_URL` and `RECAPTCHA_SITE_KEY`.
+The Pages workflow generates an allowlisted public artifact, excluding `.env`,
+backend source, and deployment artifacts. Do not publish the repository root
+from a general-purpose web server that could serve `.env`.
+
+Removing a value from current source does not remove earlier Git history.
+Rotate any actual credential exposed in commits, logs, or chat. History rewriting
+requires a coordinated, separate operation; this change does not force-push.

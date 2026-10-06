@@ -1,12 +1,19 @@
 .ic-content {
     max-width: 640px;
     text-align: left;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .ic-content h1 {
     font-family: "Sabbath Black";
     font-size: 64px;
     margin-bottom: 1rem;
+}
+
+#ic-gate > p {
+    width: 100%;
+    max-width: 640px;
 }
 
 #ic-tool p {
@@ -35,6 +42,12 @@
     color: rgb(241, 218, 168);
     padding: 0.5rem;
     font-size: 1rem;
+}
+
+.ic-form select,
+.ic-form select option {
+    background-color: #000;
+    color: rgb(241, 218, 168);
 }
 
 .ic-form button {
@@ -78,4 +91,33 @@
 #ic-status {
     margin-top: 1rem;
     min-height: 1.5em;
+}
+
+.ic-content p {
+    letter-spacing: 0;
+}
+
+.ic-form input,
+.ic-form select,
+.ic-form textarea {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 600px) {
+    .page-content.ic-content {
+        max-width: calc(100vw - 32px);
+        width: calc(100vw - 32px);
+        padding: 20px;
+    }
+
+    .ic-content h1 {
+        font-size: 40px;
+        overflow-wrap: anywhere;
+    }
+
+    .g-recaptcha {
+        overflow-x: auto;
+    }
 }

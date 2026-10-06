@@ -12,6 +12,7 @@ are ones we generated ourselves in /tmp.
 """
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -53,13 +54,13 @@ def _mark_job(job_id, **fields):
     )
 
 
-def _decode_to_intermediate(source_path: str, source_ext: str) -> str:
+def _decode_to_intermediate(source_path: str, source_ext: str, work_dir: str) -> str:
     """Normalizes any supported source format down to a plain raster file
     ImageMagick can read without any special delegate, returning its path."""
     work_id = uuid.uuid4().hex
 
     if source_ext in VECTOR_DOC_EXTENSIONS:
-        intermediate = os.path.join(TMP_DIR, f"{work_id}.png")
+        intermediate = os.path.join(work_dir, f"{work_id}.png")
         if source_ext == "svg":
             _run(["rsvg-convert", "-o", intermediate, source_path])
         else:  # pdf, eps, ai (ai files with PDF compatibility open fine via gs)
@@ -77,7 +78,7 @@ def _decode_to_intermediate(source_path: str, source_ext: str) -> str:
         return tiff_path
 
     if source_ext in HEIC_EXTENSIONS:
-        intermediate = os.path.join(TMP_DIR, f"{work_id}.png")
+        intermediate = os.path.join(work_dir, f"{work_id}.png")
         _run(["heif-convert", source_path, intermediate])
         return intermediate
 
@@ -85,8 +86,16 @@ def _decode_to_intermediate(source_path: str, source_ext: str) -> str:
     return source_path
 
 
-def _encode_target(intermediate_path: str, target_format: str) -> str:
-    output_path = os.path.join(TMP_DIR, f"{uuid.uuid4().hex}.{target_format}")
+def _encode_target(intermediate_path: str, target_format: str, work_dir: str, operation: str = "convert") -> str:
+    output_path = os.path.join(work_dir, f"{uuid.uuid4().hex}.{target_format}")
+
+    if operation == "optimize":
+        _run([
+            "convert", f"{intermediate_path}[0]", "-auto-orient",
+            "-resize", "1080x1080", "-strip", "-quality", "80",
+            f"webp:{output_path}",
+        ])
+        return output_path
 
     if target_format in HEIC_EXTENSIONS:
         _run(["heif-enc", "-o", output_path, intermediate_path])
@@ -103,32 +112,32 @@ def handler(event, context):
     target_format = event["targetFormat"]
     source_ext = source_key.rsplit(".", 1)[-1].lower()
 
-    local_source = os.path.join(TMP_DIR, f"src-{uuid.uuid4().hex}.{source_ext}")
-
     try:
         head = _s3.head_object(Bucket=os.environ["UPLOADS_BUCKET"], Key=source_key)
         if head["ContentLength"] > MAX_UPLOAD_BYTES:
             raise ValueError("Uploaded file exceeds the size limit.")
 
-        _s3.download_file(os.environ["UPLOADS_BUCKET"], source_key, local_source)
+        with tempfile.TemporaryDirectory(dir=TMP_DIR) as work_dir:
+            local_source = os.path.join(work_dir, f"source.{source_ext}")
+            _s3.download_file(os.environ["UPLOADS_BUCKET"], source_key, local_source)
 
-        intermediate = _decode_to_intermediate(local_source, source_ext)
-        output_path = _encode_target(intermediate, target_format)
+            intermediate = _decode_to_intermediate(local_source, source_ext, work_dir)
+            output_path = _encode_target(intermediate, target_format, work_dir, event.get("operation", "convert"))
 
-        result_key = f"{job_id}/output.{target_format}"
-        _s3.upload_file(output_path, os.environ["OUTPUTS_BUCKET"], result_key)
+            result_key = f"{job_id}/output.{target_format}"
+            _s3.upload_file(output_path, os.environ["OUTPUTS_BUCKET"], result_key)
 
         _mark_job(job_id, status="DONE", resultKey=result_key, finishedAt=int(time.time()))
     except subprocess.CalledProcessError as err:
         _mark_job(
             job_id,
             status="ERROR",
-            error=f"Conversion tool failed: {err.stderr.decode('utf-8', 'ignore')[:500]}",
+            error="This image could not be processed. It may be unsupported or damaged.",
         )
     except subprocess.TimeoutExpired:
         _mark_job(job_id, status="ERROR", error="Conversion timed out.")
-    except Exception as err:  # noqa: BLE001 - last-resort guard so jobs never hang at PENDING
-        _mark_job(job_id, status="ERROR", error=str(err)[:500])
+    except Exception:
+        _mark_job(job_id, status="ERROR", error="Image processing failed.")
     finally:
         # Best-effort cleanup of anything left in /tmp for this invocation.
         try:
