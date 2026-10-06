@@ -6,7 +6,8 @@ const churchImages = [
   './assets/img/church/mother.webp',
   './assets/img/church/questions.webp',
   './assets/img/church/real.webp',
-  './assets/img/church/reality.webp'
+  './assets/img/church/reality.webp',
+  './assets/img/church/obscurity.png',
 ];
 
 const churchImage = document.querySelector('.church-image');
