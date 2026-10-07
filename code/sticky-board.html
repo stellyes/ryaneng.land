@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ryan's Sticky Board</title>
+    <link rel="stylesheet" href="../assets/css/fonts.css">
+    <link rel="stylesheet" href="../assets/css/sticky-board.css">
+    <link rel="icon" href="../favicon.ico" type="image/x-icon">
+  </head>
+  <body class="sb-page">
+    <button class="sb-back sb-box" id="sb-back" type="button" aria-label="Go back">&larr; Back</button>
+
+    <main id="sb-world" class="sb-world" aria-label="Sticky note board">
+      <div id="sb-notes" class="sb-layer"></div>
+
+      <section id="sb-hub" class="sb-hub" aria-labelledby="sb-title">
+        <div class="sb-hub-main sb-box">
+          <h1 id="sb-title">The Sticky Board</h1>
+          <p class="sb-hub-sub">One note per device, per month.</p>
+          <div class="sb-hub-actions">
+            <button id="sb-create-btn" class="sb-btn sb-primary" type="button" aria-haspopup="dialog">Create note</button>
+            <button id="sb-display-btn" class="sb-btn sb-primary" type="button" aria-pressed="false" hidden>Display note</button>
+            <div class="sb-hub-row">
+              <button id="sb-bump-btn" class="sb-btn" type="button" hidden>Bump to top</button>
+              <button id="sb-move-btn" class="sb-btn" type="button" hidden>Move note</button>
+            </div>
+          </div>
+          <p id="sb-hub-status" class="sb-hub-status" role="status" aria-live="polite"></p>
+          <p id="sb-reset" class="sb-reset"></p>
+        </div>
+        <button id="sb-help-btn" class="sb-help-toggle sb-box" type="button" aria-haspopup="dialog" aria-label="What is this?">?</button>
+      </section>
+
+      <div id="sb-ghost-layer" class="sb-layer"></div>
+    </main>
+
+    <div id="sb-editbar" class="sb-editbar sb-box" role="toolbar" aria-label="Note placement" hidden>
+      <p class="sb-editbar-hint">Drag to move &middot; drag the knob to rotate &middot; arrow keys &amp; [ ] work too</p>
+      <div class="sb-editbar-buttons">
+        <button class="sb-btn sb-icon" type="button" data-act="rotl" aria-label="Rotate left 15 degrees">&#10226;</button>
+        <button class="sb-btn sb-icon" type="button" data-act="rotr" aria-label="Rotate right 15 degrees">&#10227;</button>
+        <button class="sb-btn" type="button" data-act="edit" id="sb-edit-content">Edit</button>
+        <button class="sb-btn" type="button" data-act="cancel">Cancel</button>
+        <button class="sb-btn sb-primary" type="button" data-act="commit" id="sb-edit-commit">Post note</button>
+      </div>
+    </div>
+
+    <div id="sb-toast" class="sb-toast" role="status" aria-live="polite" hidden></div>
+
+    <dialog id="sb-create" class="sb-dialog" aria-labelledby="sb-create-title">
+      <div class="sb-dialog-head">
+        <h2 id="sb-create-title">New note</h2>
+        <button type="button" class="sb-x" data-close aria-label="Close">&times;</button>
+      </div>
+
+      <div class="sb-tabs" role="tablist" aria-label="Note type">
+        <button type="button" role="tab" id="sb-tab-text" data-type="text" aria-controls="sb-panel-text" aria-selected="true">Text</button>
+        <button type="button" role="tab" id="sb-tab-draw" data-type="draw" aria-controls="sb-panel-draw" aria-selected="false" tabindex="-1">Draw</button>
+        <button type="button" role="tab" id="sb-tab-photo" data-type="photo" aria-controls="sb-panel-photo" aria-selected="false" tabindex="-1">Photo</button>
+      </div>
+
+      <section id="sb-panel-text" class="sb-panel" role="tabpanel" aria-labelledby="sb-tab-text" data-panel="text">
+        <textarea id="sb-text" class="sb-square" maxlength="256" placeholder="Say something&hellip;" aria-label="Note text" aria-describedby="sb-text-count"></textarea>
+        <p class="sb-counter" id="sb-text-count">0 / 256</p>
+      </section>
+
+      <section id="sb-panel-draw" class="sb-panel" role="tabpanel" aria-labelledby="sb-tab-draw" data-panel="draw" hidden>
+        <canvas id="sb-draw" class="sb-square" width="640" height="640" aria-label="Drawing canvas"></canvas>
+        <div class="sb-tools">
+          <div class="sb-swatches" id="sb-inks" role="group" aria-label="Ink color"></div>
+          <label class="sb-range">Size <input type="range" id="sb-brush" min="2" max="48" value="10"></label>
+          <button type="button" class="sb-btn sb-small" id="sb-eraser" aria-pressed="false">Eraser</button>
+          <button type="button" class="sb-btn sb-small" id="sb-undo">Undo</button>
+          <button type="button" class="sb-btn sb-small" id="sb-clear">Clear</button>
+        </div>
+      </section>
+
+      <section id="sb-panel-photo" class="sb-panel" role="tabpanel" aria-labelledby="sb-tab-photo" data-panel="photo" hidden>
+        <label class="sb-file sb-square" id="sb-photo-empty">
+          <span>Choose a photo</span>
+          <input type="file" id="sb-photo-input" accept="image/*">
+        </label>
+        <canvas id="sb-crop" class="sb-square" width="640" height="640" aria-label="Photo crop. Drag to reposition." hidden></canvas>
+        <div class="sb-tools" id="sb-crop-tools" hidden>
+          <label class="sb-range">Zoom <input type="range" id="sb-zoom" min="1" max="4" step="0.01" value="1"></label>
+          <button type="button" class="sb-btn sb-small" id="sb-photo-change">Change photo</button>
+        </div>
+        <p class="sb-counter">Photos are cropped to a square. Drag to frame it.</p>
+      </section>
+
+      <div class="sb-tools" id="sb-paper-row">
+        <span>Paper</span>
+        <div class="sb-swatches" id="sb-papers" role="group" aria-label="Paper color"></div>
+      </div>
+
+      <p class="sb-error" id="sb-create-error" role="alert"></p>
+
+      <div class="sb-dialog-foot">
+        <button type="button" class="sb-btn" data-close>Cancel</button>
+        <button type="button" class="sb-btn sb-primary" id="sb-place">Place on board</button>
+      </div>
+    </dialog>
+
+    <dialog id="sb-help" class="sb-dialog" aria-labelledby="sb-help-title">
+      <div class="sb-dialog-head">
+        <h2 id="sb-help-title">What is this?</h2>
+        <button type="button" class="sb-x" data-close aria-label="Close">&times;</button>
+      </div>
+      <p>A shared corkboard for anyone who wanders by. Pin up a typed note, a drawing, or a photo, and put it wherever you like.</p>
+      <ul>
+        <li><strong>One note per device, per month.</strong> Choose wisely.</li>
+        <li><strong>The board is wiped clean</strong> at midnight (Pacific) on the 1st of every month.</li>
+        <li><strong>Newest notes land on top.</strong> If someone covers yours, press <em>Display note</em> to see its outline and contents above everything else.</li>
+        <li><strong>Once a day</strong> you can bump a covered note back to the top.</li>
+        <li><strong>Click your own note</strong> (or press <em>Move note</em>) to drag and rotate it.</li>
+      </ul>
+      <section id="sb-demo-tools" class="sb-demo" hidden>
+        <h3>Demo tools</h3>
+        <p>This demo keeps the board in your browser only, so you're the only one who sees it. These buttons fake other visitors and the passage of time.</p>
+        <div class="sb-demo-buttons">
+          <button type="button" class="sb-btn sb-small" data-demo="cover">A stranger covers my note</button>
+          <button type="button" class="sb-btn sb-small" data-demo="tomorrow">Pretend it's tomorrow</button>
+          <button type="button" class="sb-btn sb-small" data-demo="device">Act as a new device</button>
+          <button type="button" class="sb-btn sb-small" data-demo="wipe">Wipe this month's board</button>
+        </div>
+      </section>
+      <div class="sb-dialog-foot">
+        <button type="button" class="sb-btn sb-primary" data-close>Got it</button>
+      </div>
+    </dialog>
+
+    <noscript><p class="sb-noscript">Enable JavaScript to see the board.</p></noscript>
+    <script src="../assets/js/sticky-board.js"></script>
+  </body>
+</html>
