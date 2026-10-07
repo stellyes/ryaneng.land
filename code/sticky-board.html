@@ -11,32 +11,42 @@
   <body class="sb-page">
     <button class="sb-back sb-box" id="sb-back" type="button" aria-label="Go back">&larr; Back</button>
 
-    <main id="sb-world" class="sb-world" aria-label="Sticky note board">
-      <div id="sb-notes" class="sb-layer"></div>
+    <main id="sb-viewport" class="sb-viewport" aria-label="Sticky note board">
+      <div id="sb-world" class="sb-world">
+        <div id="sb-notes" class="sb-layer"></div>
 
-      <section id="sb-hub" class="sb-hub" aria-labelledby="sb-title">
-        <div class="sb-hub-main sb-box">
-          <h1 id="sb-title">The Sticky Board</h1>
-          <p class="sb-hub-sub">One note per device, per month.</p>
-          <div class="sb-hub-actions">
-            <button id="sb-create-btn" class="sb-btn sb-primary" type="button" aria-haspopup="dialog">Create note</button>
-            <button id="sb-display-btn" class="sb-btn sb-primary" type="button" aria-pressed="false" hidden>Display note</button>
-            <div class="sb-hub-row">
-              <button id="sb-bump-btn" class="sb-btn" type="button" hidden>Bump to top</button>
-              <button id="sb-move-btn" class="sb-btn" type="button" hidden>Move note</button>
+        <section id="sb-hub" class="sb-hub" aria-labelledby="sb-title">
+          <div class="sb-hub-main sb-box">
+            <h1 id="sb-title">The Sticky Board</h1>
+            <p class="sb-hub-sub">One note per device, per month.</p>
+            <div class="sb-hub-actions">
+              <button id="sb-create-btn" class="sb-btn sb-primary" type="button" aria-haspopup="dialog">Create note</button>
+              <button id="sb-display-btn" class="sb-btn sb-primary" type="button" aria-pressed="false" hidden>Display note</button>
+              <div class="sb-hub-row">
+                <button id="sb-bump-btn" class="sb-btn" type="button" hidden>Bump to top</button>
+                <button id="sb-move-btn" class="sb-btn" type="button" hidden>Move note</button>
+              </div>
             </div>
+            <p id="sb-hub-status" class="sb-hub-status" role="status" aria-live="polite"></p>
+            <p id="sb-reset" class="sb-reset"></p>
           </div>
-          <p id="sb-hub-status" class="sb-hub-status" role="status" aria-live="polite"></p>
-          <p id="sb-reset" class="sb-reset"></p>
-        </div>
-        <button id="sb-help-btn" class="sb-help-toggle sb-box" type="button" aria-haspopup="dialog" aria-label="What is this?">?</button>
-      </section>
+          <button id="sb-help-btn" class="sb-help-toggle sb-box" type="button" aria-haspopup="dialog" aria-label="What is this?">?</button>
+        </section>
 
-      <div id="sb-ghost-layer" class="sb-layer"></div>
+        <div id="sb-ghost-layer" class="sb-layer"></div>
+      </div>
     </main>
 
+    <div id="sb-compact-hub" class="sb-editbar sb-compact-hub sb-box" role="group" aria-label="Your note controls" hidden>
+      <div class="sb-editbar-buttons">
+        <button class="sb-btn sb-primary" type="button" data-hub-action="sb-display-btn" aria-pressed="false">Display note</button>
+        <button class="sb-btn" type="button" data-hub-action="sb-bump-btn">Bump to top</button>
+        <button class="sb-btn" type="button" data-hub-action="sb-move-btn">Move note</button>
+      </div>
+    </div>
+
     <div id="sb-editbar" class="sb-editbar sb-box" role="toolbar" aria-label="Note placement" hidden>
-      <p class="sb-editbar-hint">Drag to move &middot; drag the knob to rotate &middot; arrow keys &amp; [ ] work too</p>
+      <p class="sb-editbar-hint">Drag to move &middot; drag the knob to rotate &middot; arrow keys &amp; square brackets work too</p>
       <div class="sb-editbar-buttons">
         <button class="sb-btn sb-icon" type="button" data-act="rotl" aria-label="Rotate left 15 degrees">&#10226;</button>
         <button class="sb-btn sb-icon" type="button" data-act="rotr" aria-label="Rotate right 15 degrees">&#10227;</button>
@@ -114,6 +124,8 @@
         <li><strong>Newest notes land on top.</strong> If someone covers yours, press <em>Display note</em> to see its outline and contents above everything else.</li>
         <li><strong>Once a day</strong> you can bump a covered note back to the top.</li>
         <li><strong>Click your own note</strong> (or press <em>Move note</em>) to drag and rotate it.</li>
+        <li><strong>Away from the center,</strong> compact note controls appear at the bottom. While you move your note, placement controls replace them.</li>
+        <li><strong>On phones and tablets,</strong> swipe across the board to explore. Back stays at the top left, and placement controls stay at the bottom while you move your note.</li>
       </ul>
       <section id="sb-demo-tools" class="sb-demo" hidden>
         <h3>Demo tools</h3>

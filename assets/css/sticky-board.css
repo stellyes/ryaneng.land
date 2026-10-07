@@ -20,7 +20,9 @@ html {
 
 body.sb-page {
     margin: 0;
+    width: 100%;
     min-height: 100vh;
+    overflow: hidden;
     font-family: 'Warbler', Georgia, serif;
     color: var(--cream);
     background-color: var(--moss);
@@ -95,8 +97,8 @@ textarea {
 /* Fixed back button */
 .sb-back {
     position: fixed;
-    top: 1rem;
-    left: 1rem;
+    top: calc(1rem + env(safe-area-inset-top, 0px));
+    left: calc(1rem + env(safe-area-inset-left, 0px));
     z-index: 40000000;
     min-height: 44px;
     padding: 0.55rem 1rem;
@@ -107,6 +109,15 @@ textarea {
 .sb-back:hover {
     background: var(--cream);
     color: #0b2402;
+}
+
+/* Keep the oversized board out of the document's mobile layout viewport. */
+.sb-viewport {
+    position: fixed;
+    inset: 0;
+    overflow: auto;
+    overscroll-behavior: none;
+    overflow-anchor: none;
 }
 
 /* The world: sized by JS so it always contains every note */
@@ -348,11 +359,11 @@ textarea {
 /* Placement toolbar */
 .sb-editbar {
     position: fixed;
-    bottom: 1rem;
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
     left: 50%;
     z-index: 40000000;
     width: max-content;
-    max-width: calc(100vw - 1.5rem);
+    max-width: calc(100vw - 1.5rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
     padding: 0.6rem 0.75rem 0.75rem;
     transform: translateX(-50%);
 }
@@ -607,13 +618,35 @@ textarea {
     text-align: center;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 767px) {
     .sb-back {
-        top: 0.6rem;
-        left: 0.6rem;
+        top: calc(0.6rem + env(safe-area-inset-top, 0px));
+        left: calc(0.6rem + env(safe-area-inset-left, 0px));
     }
 
     .sb-hub h1 {
         font-size: 1.7rem;
+    }
+
+    .sb-editbar {
+        bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+        width: calc(100vw - 1.2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+        padding: 0.5rem;
+    }
+
+    .sb-editbar-hint {
+        font-size: 0.75rem;
+        letter-spacing: 0;
+    }
+
+    .sb-editbar-buttons {
+        gap: 0.35rem;
+    }
+
+    .sb-editbar-buttons .sb-btn:not(.sb-icon) {
+        min-width: 0;
+        padding-inline: 0.5rem;
+        font-size: 0.9rem;
+        letter-spacing: 0;
     }
 }

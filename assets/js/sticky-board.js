@@ -346,11 +346,14 @@
         busy: false,
     };
 
+    const viewport = $('sb-viewport');
     const world = $('sb-world');
     const notesLayer = $('sb-notes');
     const ghostLayer = $('sb-ghost-layer');
     const hub = $('sb-hub');
     const editbar = $('sb-editbar');
+    const compactHub = $('sb-compact-hub');
+    let hubInView = true;
     const els = new Map();
 
     const myNote = () => state.notes.find((n) => n.deviceId === state.deviceId) || null;
@@ -375,8 +378,8 @@
 
     function updateWorld() {
         const r = N * Math.SQRT1_2 + 60; // rotated half-diagonal plus room for the rotate knob
-        const vw = document.documentElement.clientWidth;
-        const vh = document.documentElement.clientHeight;
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
         const hw = hub.offsetWidth / 2 + 40;
         const hh = hub.offsetHeight / 2 + 40;
         let minX = Math.min(-vw / 2, -hw);
@@ -398,24 +401,37 @@
         hub.style.left = `${origin.x}px`;
         hub.style.top = `${origin.y}px`;
         // Growing up/left shifts every coordinate; scroll by the same amount so nothing jumps.
-        if (dx || dy) window.scrollBy(dx, dy);
+        if (dx || dy) {
+            for (const note of displayNotes()) {
+                const el = els.get(note.id);
+                if (el) placeEl(el, note);
+            }
+            const ghost = ghostLayer.querySelector('.sb-ghost');
+            const mine = myNote();
+            if (ghost && mine) placeEl(ghost, mine);
+            viewport.scrollBy(dx, dy);
+        }
         return dx !== 0 || dy !== 0;
     }
 
     function centerView() {
-        const de = document.documentElement;
-        window.scrollTo(state.origin.x - de.clientWidth / 2, state.origin.y - de.clientHeight / 2);
+        const panel = hub.querySelector('.sb-hub-main').getBoundingClientRect();
+        const rect = viewport.getBoundingClientRect();
+        viewport.scrollBy(
+            panel.left + panel.width / 2 - rect.left - viewport.clientWidth / 2,
+            panel.top + panel.height / 2 - rect.top - viewport.clientHeight / 2,
+        );
     }
 
     function scrollToNote(note) {
-        const de = document.documentElement;
+        const de = viewport;
         const rect = world.getBoundingClientRect();
         const cx = rect.left + state.origin.x + note.x;
         const cy = rect.top + state.origin.y + note.y;
         const m = N * 0.75;
         if (cx > m && cx < de.clientWidth - m && cy > m && cy < de.clientHeight - m) return;
         const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        window.scrollTo({
+        viewport.scrollTo({
             left: state.origin.x + note.x - de.clientWidth / 2,
             top: state.origin.y + note.y - de.clientHeight / 2,
             behavior: reduce ? 'auto' : 'smooth',
@@ -571,6 +587,19 @@
             status.textContent = drafting ? 'Drag your note into place, then post it.' : '';
         }
         $('sb-reset').textContent = resetText();
+        renderCompactHub();
+    }
+
+    function renderCompactHub() {
+        compactHub.hidden = hubInView || !myNote() || !!state.active;
+        compactHub.querySelectorAll('[data-hub-action]').forEach((button) => {
+            const source = $(button.dataset.hubAction);
+            button.textContent = source.textContent;
+            button.disabled = source.disabled;
+            if (source.hasAttribute('aria-pressed')) {
+                button.setAttribute('aria-pressed', source.getAttribute('aria-pressed'));
+            }
+        });
     }
 
     function renderEditbar() {
@@ -615,7 +644,7 @@
         if (state.active && state.active.kind === 'draft') {
             Object.assign(state.active.note, content);
         } else {
-            const de = document.documentElement;
+            const de = viewport;
             const c = toWorld(de.clientWidth / 2, de.clientHeight / 2);
             let { x, y } = c;
             const hw = hub.offsetWidth / 2;
@@ -720,7 +749,7 @@
 
     function autoScrollTick() {
         if (!drag || drag.mode !== 'move') return;
-        const de = document.documentElement;
+        const de = viewport;
         const edge = 48;
         const speed = 14;
         let dx = 0;
@@ -730,7 +759,7 @@
         if (drag.cy < edge) dy = -speed;
         else if (drag.cy > de.clientHeight - edge) dy = speed;
         if (dx || dy) {
-            window.scrollBy(dx, dy);
+            viewport.scrollBy(dx, dy);
             applyDrag();
         }
         drag.raf = requestAnimationFrame(autoScrollTick);
@@ -761,7 +790,7 @@
         // Mouse users can grab empty board to pan; touch already scrolls natively.
         if (!noteEl && e.pointerType === 'mouse' && !e.target.closest('.sb-hub')) {
             e.preventDefault();
-            drag = { mode: 'pan', pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, x0: window.scrollX, y0: window.scrollY };
+            drag = { mode: 'pan', pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, x0: viewport.scrollLeft, y0: viewport.scrollTop };
             document.body.style.cursor = 'grabbing';
         }
     });
@@ -769,7 +798,7 @@
     window.addEventListener('pointermove', (e) => {
         if (!drag || e.pointerId !== drag.pointerId) return;
         if (drag.mode === 'pan') {
-            window.scrollTo(drag.x0 - (e.clientX - drag.sx), drag.y0 - (e.clientY - drag.sy));
+            viewport.scrollTo(drag.x0 - (e.clientX - drag.sx), drag.y0 - (e.clientY - drag.sy));
             return;
         }
         drag.cx = e.clientX;
@@ -834,6 +863,11 @@
     });
 
     // ---- Hub buttons ----
+
+    compactHub.addEventListener('click', (e) => {
+        const button = e.target.closest('[data-hub-action]');
+        if (button) $(button.dataset.hubAction).click();
+    });
 
     $('sb-back').addEventListener('click', () => {
         if (window.history.length > 1) window.history.back();
@@ -1216,17 +1250,22 @@
             toast(err.message || 'Could not load the board.');
         }
         renderAll();
-        centerView();
 
         if (document.fonts && document.fonts.ready) {
-            document.fonts.ready.then(() => {
-                els.forEach(fitText);
-                renderGhost();
-            });
+            await document.fonts.ready;
+            els.forEach(fitText);
+            renderGhost();
         }
+        updateWorld();
+        centerView();
 
         store.subscribe(() => { if (!drag) reload(); });
         window.addEventListener('resize', () => updateWorld());
+        new ResizeObserver(() => updateWorld()).observe(viewport);
+        new IntersectionObserver(([entry]) => {
+            hubInView = entry.isIntersecting;
+            renderCompactHub();
+        }, { root: viewport }).observe(hub.querySelector('.sb-hub-main'));
 
         // Watch for midnight: new day re-enables bumping, a new month wipes the board.
         setInterval(() => {
