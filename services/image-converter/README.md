@@ -130,6 +130,26 @@ The Pages workflow generates an allowlisted public artifact, excluding `.env`,
 backend source, and deployment artifacts. Do not publish the repository root
 from a general-purpose web server that could serve `.env`.
 
+### GitHub Pages setup
+
+1. Open the repository's **Settings > Pages > Build and deployment**.
+2. Set **Source** to **GitHub Actions**, not **Deploy from a branch**.
+3. In **Settings > Secrets and variables > Actions > Variables**, set
+   `IMAGE_TOOLS_API_URL` and `RECAPTCHA_SITE_KEY`.
+4. In **Actions > Publish Website**, run the workflow on the default branch
+   (or rerun the latest run), and wait for deployment to complete.
+5. Confirm `/tools/image-config.js` returns JavaScript with `apiUrl` and
+   `recaptchaSiteKey`, then reload both image-tool pages.
+
+If both tools show "Image tools are temporarily unavailable" and
+`/tools/image-config.js` returns 404, check the publishing source first.
+Branch publishing runs the legacy **pages build and deployment** workflow,
+which does not run `build-tools.ps1` and cannot include the ignored generated
+configuration. It can overwrite a successful **Publish Website** deployment.
+The custom workflow checks the publishing source and fails explicitly when
+branch publishing is still enabled; a successful custom deployment alone does
+not mean the source setting is correct.
+
 Removing a value from current source does not remove earlier Git history.
 Rotate any actual credential exposed in commits, logs, or chat. History rewriting
 requires a coordinated, separate operation; this change does not force-push.
