@@ -18,6 +18,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify Pages publishing source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $pages = Invoke-RestMethod -Uri "$env:GITHUB_API_URL/repos/$env:GITHUB_REPOSITORY/pages" -Headers $headers
+          if ($pages.build_type -ne 'workflow') {
+            throw 'Set Settings > Pages > Build and deployment > Source to GitHub Actions, then rerun Publish Website. Branch publishing overwrites the generated image-tool configuration.'
+          }
       - uses: actions/configure-pages@v5
       - name: Build Public Site
         shell: pwsh

@@ -153,10 +153,6 @@ p, li {
     font-size: 1em;
 }
 
-.page-content li {
-    margin: 3vh 0;
-}
-
 /* ============ Side Navigation ============ */
 
 main {
@@ -221,7 +217,7 @@ main:has(.home-container) {
     display: flex;
     flex-direction: column;
     gap: 0.5em;
-    border-bottom: 1px solid rgba(241, 218, 168, 0.3);
+    border-bottom: 2px solid rgba(241, 218, 168);
     padding-bottom: var(--post-list-spacing);
 }
 
