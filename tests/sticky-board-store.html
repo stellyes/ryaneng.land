@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Sticky board store tests</title></head>
+<body>
+<pre id="results">Running...</pre>
+<script src="../assets/js/sticky-board-store.js"></script>
+<script>
+(async () => {
+    'use strict';
+    const key = 'sticky-board:cloud-identity';
+    const saved = localStorage.getItem(key);
+    const originalFetch = window.fetch;
+    const results = [];
+    const calls = [];
+    let failMutation = true;
+    let revision = 1;
+    let month = '2026-10';
+    const assert = (condition, name) => {
+        if (!condition) throw new Error(name);
+        results.push(`PASS ${name}`);
+    };
+    try {
+        localStorage.setItem(key, JSON.stringify({ credential: 'test-credential', deviceId: 'test-owner' }));
+        window.fetch = async (url, options) => {
+            const path = new URL(url).pathname;
+            const body = options.body && JSON.parse(options.body);
+            calls.push({ path, body, authorization: options.headers.Authorization });
+            if (path === '/notes' && failMutation) {
+                failMutation = false;
+                throw new Error('Simulated connection loss');
+            }
+            if (path === '/notes') return Response.json({ note: { id: 'note-1', version: 1 } });
+            if (path === '/board') return Response.json({
+                month, revision, hasPosted: true, serverNow: Date.now(), resetAt: Date.now() + 60000,
+                notes: [{ id: 'note-1', deviceId: 'test-owner' }],
+            });
+            if (path === '/revision') return Response.json({ month, revision });
+            if (path === '/notes/note-1') return Response.json({ note: { id: 'note-1', version: 2 } });
+            if (path === '/notes/note-1/bump') return Response.json({ message: 'Already bumped today' }, { status: 409 });
+            throw new Error(`Unexpected path: ${path}`);
+        };
+        const store = new CloudBoardStore({ apiUrl: 'https://test.invalid' });
+        await store.ready;
+        await store.list();
+        assert(store.identity.deviceId === 'test-owner', 'Saved identity is reused');
+        assert(store.month === month && store.revision === revision, 'Snapshot tracks authoritative month and revision');
+        assert(store.hasPosted === true, 'Monthly submission claim is tracked independently of note existence');
+        assert(Math.abs(store.clockOffset) < 1000, 'Server clock offset is tracked');
+        assert(calls[0].authorization === 'Bearer test-credential', 'Requests authenticate with credential');
+        const data = { type: 'text', content: 'hello', paper: 'yellow', x: 0, y: 0, rot: 0 };
+        try { await store.create(month, data); } catch (error) {
+            assert(error.message === 'Simulated connection loss', 'Network errors surface to caller');
+        }
+        const note = await store.create(month, data);
+        const mutations = calls.filter((call) => call.path === '/notes');
+        assert(mutations[0].body.requestId === mutations[1].body.requestId, 'Retry preserves idempotency key');
+        assert(note.id === 'note-1', 'Mutation unwraps returned note');
+        await store.update(month, note.id, 'ignored-owner', { x: 10, y: 20, rot: 30, version: 1 });
+        const move = calls.find((call) => call.path === '/notes/note-1');
+        assert(move.body.version === 1 && !('deviceId' in move.body), 'Move uses version and not client-supplied ownership');
+        try { await store.bump(month, note.id, 'ignored-owner', 2); } catch (error) {
+            assert(error.message === 'Already bumped today', 'Server rule violations surface');
+        }
+        let notifications = 0;
+        store.listeners.add(() => notifications++);
+        Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+        await store.checkRevision();
+        assert(notifications === 0, 'Unchanged revision avoids reload');
+        revision++;
+        await store.checkRevision();
+        assert(notifications === 1, 'Changed revision requests reconciliation');
+        month = '2026-11';
+        await store.checkRevision();
+        assert(notifications === 2, 'Month rollover requests reconciliation');
+        clearTimeout(store.resetTimer);
+        document.querySelector('#results').textContent = results.join('\n');
+        document.body.dataset.result = 'passed';
+    } catch (error) {
+        document.querySelector('#results').textContent = `${results.join('\n')}\nFAIL ${error.stack}`;
+        document.body.dataset.result = 'failed';
+    } finally {
+        window.fetch = originalFetch;
+        delete document.hidden;
+        if (saved === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, saved);
+    }
+})();
+</script>
+</body>
+</html>

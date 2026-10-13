@@ -31,12 +31,18 @@
     const ACTIVE_Z = 20000000;
     const GHOST_Z = 30000000;
     const DEVICE_KEY = 'sticky-board:device';
+    let clockOffset = 0;
 
     const $ = (id) => document.getElementById(id);
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
     const pad2 = (n) => String(n).padStart(2, '0');
     const paperColor = (id) => (PAPERS.find((p) => p.id === id) || PAPERS[0]).color;
-    const isSafeImage = (src) => typeof src === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(src);
+    const isSafeImage = (src) => {
+        if (typeof src !== 'string') return false;
+        if (/^data:image\/(png|jpeg|webp);base64,/.test(src)) return true;
+        const mediaUrl = window.STICKY_BOARD_CONFIG && window.STICKY_BOARD_CONFIG.mediaUrl;
+        return !!mediaUrl && src.startsWith(`${mediaUrl}/published/`) && !src.includes('..');
+    };
     const normDeg = (d) => Math.round(((((d + 180) % 360) + 360) % 360 - 180) * 10) / 10;
 
     function uid() {
@@ -66,7 +72,7 @@
         timeZone: CONFIG.timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
     });
 
-    function boardDate(date = new Date()) {
+    function boardDate(date = new Date(Date.now() + clockOffset)) {
         const p = {};
         for (const part of dateFmt.formatToParts(date)) p[part.type] = part.value;
         return { y: +p.year, m: +p.month, d: +p.day };
@@ -335,7 +341,9 @@
 
     // ---- State ----
 
-    const store = new LocalDemoStore();
+    const cloudConfig = window.STICKY_BOARD_CONFIG || {};
+    const demo = new URLSearchParams(location.search).get('demo') === '1' || (location.protocol === 'file:' && !cloudConfig.apiUrl);
+    const store = demo ? new LocalDemoStore() : new window.CloudBoardStore(cloudConfig);
     const state = {
         month: monthKey(),
         deviceId: getDeviceId(),
@@ -344,6 +352,8 @@
         showGhost: false,
         origin: { x: 0, y: 0 },
         busy: false,
+        available: demo,
+        loadError: '',
     };
 
     const viewport = $('sb-viewport');
@@ -559,9 +569,10 @@
         const bumpBtn = $('sb-bump-btn');
         const moveBtn = $('sb-move-btn');
         const status = $('sb-hub-status');
+        const claimed = !store.isDemo && store.hasPosted && !mine;
 
         createBtn.hidden = !!mine;
-        createBtn.disabled = drafting || state.busy;
+        createBtn.disabled = drafting || state.busy || !state.available || claimed;
         createBtn.textContent = drafting ? 'Placing your note…' : 'Create note';
         displayBtn.hidden = !mine;
         bumpBtn.hidden = !mine;
@@ -584,7 +595,10 @@
                 status.textContent = bumpedToday ? `${count} You've bumped today, so check back tomorrow.` : `${count} You can bump it to the top.`;
             }
         } else {
-            status.textContent = drafting ? 'Drag your note into place, then post it.' : '';
+            status.textContent = !state.available
+                ? state.loadError || 'Connecting to the shared board...'
+                : claimed ? 'Your submission for this month has already been used.'
+                : drafting ? 'Drag your note into place, then post it.' : '';
         }
         $('sb-reset').textContent = resetText();
         renderCompactHub();
@@ -628,14 +642,40 @@
         toastTimer = setTimeout(() => { t.hidden = true; }, 3500);
     }
 
+    let reloading = false;
+    let reloadPending = false;
     async function reload() {
+        if (reloading || drag) {
+            reloadPending = true;
+            return;
+        }
+        reloading = true;
         try {
             state.notes = await store.list(state.month);
+            state.available = true;
+            state.loadError = '';
+            if (!store.isDemo) {
+                clockOffset = store.clockOffset;
+                state.deviceId = store.identity.deviceId;
+                if (state.month !== store.month) {
+                    state.active = null;
+                    state.showGhost = false;
+                    composer.reset();
+                }
+                state.month = store.month;
+            }
         } catch (err) {
             console.error(err);
+            state.loadError = err.message || 'Could not load the board.';
             toast(err.message || 'Could not load the board.');
+        } finally {
+            reloading = false;
         }
         renderAll();
+        if (reloadPending) {
+            reloadPending = false;
+            await reload();
+        }
     }
 
     // ---- Placing / moving ----
@@ -707,7 +747,7 @@
                 composer.reset();
                 toast('Posted! See you next month.');
             } else {
-                await store.update(state.month, a.note.id, state.deviceId, { x, y, rot });
+                await store.update(state.month, a.note.id, state.deviceId, { x, y, rot, version: a.note.version });
                 toast('Note moved.');
             }
             state.active = null;
@@ -813,6 +853,10 @@
         if (drag.el) drag.el.classList.remove('is-dragging');
         document.body.style.cursor = '';
         drag = null;
+        if (reloadPending) {
+            reloadPending = false;
+            reload();
+        }
     }
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
@@ -896,7 +940,7 @@
         state.busy = true;
         renderHub();
         try {
-            await store.bump(state.month, mine.id, state.deviceId);
+            await store.bump(state.month, mine.id, state.deviceId, mine.version);
             toast('Bumped to the top!');
         } catch (err) {
             toast(err.message);
@@ -1243,10 +1287,19 @@
 
     async function init() {
         if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+        renderHub();
         try {
             state.notes = await store.list(state.month);
+            state.available = true;
+            state.loadError = '';
+            if (!store.isDemo) {
+                clockOffset = store.clockOffset;
+                state.deviceId = store.identity.deviceId;
+                state.month = store.month;
+            }
         } catch (err) {
             console.error(err);
+            state.loadError = err.message || 'Could not load the board.';
             toast(err.message || 'Could not load the board.');
         }
         renderAll();
@@ -1259,7 +1312,10 @@
         updateWorld();
         centerView();
 
-        store.subscribe(() => { if (!drag) reload(); });
+        if (store.isDemo || cloudConfig.apiUrl) store.subscribe(() => reload());
+        window.addEventListener('sticky-board-sync-error', () => {
+            toast('Live updates interrupted. Reconnecting to the shared board.');
+        });
         window.addEventListener('resize', () => updateWorld());
         new ResizeObserver(() => updateWorld()).observe(viewport);
         new IntersectionObserver(([entry]) => {
@@ -1269,6 +1325,10 @@
 
         // Watch for midnight: new day re-enables bumping, a new month wipes the board.
         setInterval(() => {
+            if (!store.isDemo) {
+                renderHub();
+                return;
+            }
             const month = monthKey();
             if (month !== state.month) {
                 state.month = month;
