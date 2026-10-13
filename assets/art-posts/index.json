@@ -130,7 +130,7 @@
         "date": "2026-10-12",
         "type": "visual",
         "preview": "Inspiration for the album cover of \"Inside Animal\" under my project deo autem nihil",
-        "summary": "Inspiration for the album cover of \"Inside Animal\" under my project deo autem nihil",
+        "summary": "Inspiration for the album cover of \"Inside Animal\" under my project deo autem nihil. Pulled from a russian photography magazine and imposed into a forest background. The graphic is composed of a symbol pulled from a 1976 edition of BYTE magazine and fonts from the same time frame were used for the text. Couldn't tell you which ones, I'm not sure what happened to the original PSD file.",
         "images": [
             {
                 "file": "./assets/art-posts/images/against-youth/green.webp",
@@ -143,5 +143,13 @@
                 "summary": "Red rendering of the Against Youth poster"
             }
         ]
+    },
+    {
+        "slug": "xerox-blasted",
+        "title": "A Study of the Xerox machine: Physical Degradation",
+        "date": "2026-10-13",
+        "type": "visual",
+        "preview": "Digital scrapbook artwork, printed, and scanned, and printed, and scanned, and printed, and...",
+        
     }
 ]   
