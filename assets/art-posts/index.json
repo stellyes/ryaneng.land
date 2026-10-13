@@ -123,5 +123,25 @@
                 "summary": "Transparent rendering of the Take the Glory poster, with a sunset background"
             }
         ]
+    },
+    {
+        "slug": "against-youth",
+        "title": "Against Youth",
+        "date": "2026-10-12",
+        "type": "visual",
+        "preview": "Inspiration for the album cover of \"Inside Animal\" under my project deo autem nihil",
+        "summary": "Inspiration for the album cover of \"Inside Animal\" under my project deo autem nihil",
+        "images": [
+            {
+                "file": "./assets/art-posts/images/against-youth/green.webp",
+                "alt": "Green rendering of the Against Youth poster",
+                "summary": "Green rendering of the Against Youth poster"
+            },
+            {
+                "file": "./assets/art-posts/images/against-youth/red.webp",
+                "alt": "Red rendering of the Against Youth poster",
+                "summary": "Red rendering of the Against Youth poster"
+            }
+        ]
     }
-]
+]   
