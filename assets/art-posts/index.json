@@ -150,6 +150,73 @@
         "date": "2026-10-13",
         "type": "visual",
         "preview": "Digital scrapbook artwork, printed, and scanned, and printed, and scanned, and printed, and...",
-        
+        "summary": "Digital scrapbook artwork, courtesy of the Internet Archive, BYTE magazine, and a littany of russian photography magazines. Printed, scanned, printed, scanned, you get the idea. Some of these were digitally altered even after the print/scan process. Years ago I turned these into woven blanket artwork and gave some away. Olivia, I want my \"From one era into another\" blanket back, lol.",
+        "images": [
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/1.webp",
+                "alt": "Lips with a text bubble \"Basic\"",
+                "summary": "This was the first one of the project. I always liked this one."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/2.webp",
+                "alt": "A man walking out the door with the text \"Little Impact.\"",
+                "summary": "I thought this one always looked like the representation of someone going towards the light..."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/3.webp",
+                "alt": "A dark image of a distorted face",
+                "summary": "How I imagine GPT floating around the cybernetic void."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/4.webp",
+                "alt": "Solve your personal energy crisis.",
+                "summary": "Self explanatory. The graphic was ripped from an IBM ad, but I feel like in this context it gives the viewer a sense of dread. The energy crisis being due to technology draining the life from people."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/5.webp",
+                "alt": "An orb in space with the text \"Perfectly Balanced.\"",
+                "summary": "This image was cool, the xerox totally fried whatever was on the edges of the paper. Or maybe that was the scanner. Either way..."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/6.webp",
+                "alt": "Scribbled handwritten text saying \"Bend me towards the sun so that I can show you I can grow\"",
+                "summary": "This one was personal. The background was a photograph I took of a busted bus stop advertisement frame on Van Ness in San Francisco. The text was an iteration of a Jeff Buckley outtake that was never released. The idea is haunting, though. Asking the viewer to forcefully manipulate the position of the subject to force growth, as if the subject is begging for direction, relying with complete dependency. I ended up using this for the song 'bend towards the sun' by deo autem nihil as album artwork. The song is equally as haunting, in my opinion."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/7.webp",
+                "alt": "CGI graphics over a checkerboard with the text \"BREAKTHROUGH!\" above",
+                "summary": "This one struck me as a personal experience for graphic designers. As if, the subjects have been placed meticiulously after hours of deliberation, and the subject behind the canvas shouts in excitement."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/8.webp",
+                "alt": "A shot of space, with the text \"From One Era Into Another\"",
+                "summary": "I turned this one into a twin-sized blanket. Now she curses me to sleep on a twin-sized mattress. That joke will only make sense in its entirety to one person."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/9.webp",
+                "alt": "Mountains with a dramatic sky",
+                "summary": "This one took me forever. The mountains, foreground, and text effect in the background would not work together in the xerox-squared process. It was tough, but probably the most universally scenic of the series."
+            }, 
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/10.webp",
+                "alt": "A shot of a vacationing person with a Concord jet flying over",
+                "summary": "RIP the Concord. Could've traveled across the world in a few hours, but SOME PEOPLE just had to complain about the noise. Grow up. Advancement comes with changes and waits for no one. And of course, only applies when I want something to change..."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/11.webp",
+                "alt": "A printer surrounded by printed text sheets, the most recent displaying a home logo",
+                "summary": "I used this for the 'potentia per christange' release by deo autem nihil. It actually released some time around now four years ago. Time flies."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/12.webp",
+                "alt": "Clean, Elegant, Powerful...",
+                "summary": "This one always freaked me out. Looks and feels like a Benadryl nightmare."
+            },
+            {
+                "file": "./assets/art-posts/images/xerox-blasted/13.webp",
+                "alt": "RUIN ME!",
+                "summary": "By far my favorite of the series. I also turned this one into a woven blanket, and I ACTUALLY HAVE THIS ONE! HA! However, the message is ironic... I didn't realize how much I lived by this when I made it."
+            }
+        ]
     }
 ]   
