@@ -28,10 +28,7 @@ at $5, $15, and $30, plus broadcast-health alarm notifications. Confirm the SNS
 subscription email to receive health alerts. Budgets are delayed notifications,
 not spending caps, and include other AWS services in the account.
 
-The normal page uses the shared backend and reports configuration/network errors
-instead of silently substituting a private board. Add `?demo=1` for the explicit
-local-storage demo. When opened as a local file without configured endpoints, the
-demo remains available as well. Demo notes never upload to the shared board.
+The page uses the shared AWS backend exclusively and reports configuration/network errors instead of substituting a private board. Serve it through an allowed HTTP origin; there is no local-file or demo mode.
 
 Owners are anonymous browser identities, not physically identifiable devices.
 Keep browser storage to retain ownership of your note. Clearing it or changing

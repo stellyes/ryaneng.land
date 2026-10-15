@@ -6,7 +6,6 @@
     class CloudBoardStore {
         constructor(config) {
             this.config = config;
-            this.isDemo = false;
             this.listeners = new Set();
             this.identity = null;
             this.month = null;

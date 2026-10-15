@@ -7,3 +7,10 @@
 **/*.pyc
 tools/image-config.js
 _site/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.log

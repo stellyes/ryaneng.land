@@ -30,7 +30,6 @@
     const N = CONFIG.noteSize;
     const ACTIVE_Z = 20000000;
     const GHOST_Z = 30000000;
-    const DEVICE_KEY = 'sticky-board:device';
     let clockOffset = 0;
 
     const $ = (id) => document.getElementById(id);
@@ -44,27 +43,6 @@
         return !!mediaUrl && src.startsWith(`${mediaUrl}/published/`) && !src.includes('..');
     };
     const normDeg = (d) => Math.round(((((d + 180) % 360) + 360) % 360 - 180) * 10) / 10;
-
-    function uid() {
-        const bytes = new Uint8Array(12);
-        crypto.getRandomValues(bytes);
-        return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    }
-
-    const storage = {
-        get(key) {
-            try { return localStorage.getItem(key); } catch { return null; }
-        },
-        set(key, value) {
-            localStorage.setItem(key, value);
-        },
-        remove(key) {
-            try { localStorage.removeItem(key); } catch { /* ignore */ }
-        },
-        keys() {
-            try { return Object.keys(localStorage); } catch { return []; }
-        },
-    };
 
     // ---- Board time (one shared timezone so everyone resets together) ----
 
@@ -88,139 +66,6 @@
         return left <= 1 ? 'The board resets tonight at midnight.' : `The board resets in ${left} days.`;
     }
 
-    function getDeviceId(regenerate = false) {
-        let id = regenerate ? null : storage.get(DEVICE_KEY);
-        if (!id) {
-            id = uid();
-            try { storage.set(DEVICE_KEY, id); } catch { /* private mode: id lives for this visit */ }
-        }
-        return id;
-    }
-
-    // ---- Storage ----
-    //
-    // Any store must implement:
-    //   list(month)                          -> Promise<Note[]>
-    //   create(month, {deviceId, type, content, paper, x, y, rot}) -> Promise<Note>
-    //   update(month, id, deviceId, {x, y, rot})                   -> Promise<Note>
-    //   bump(month, id, deviceId)            -> Promise<Note>
-    //   subscribe(fn)                        -> called when the board changes elsewhere
-    // A real shared store must enforce the same rules server-side (one note per
-    // device per month, owner-only edits, one bump per day, monthly reset).
-
-    class BoardError extends Error {}
-
-    class LocalDemoStore {
-        constructor() {
-            this.isDemo = true;
-            this.prefix = 'sticky-board:v1:';
-            this.listeners = new Set();
-            window.addEventListener('storage', (e) => {
-                if (e.key && e.key.startsWith(this.prefix)) this.listeners.forEach((fn) => fn());
-            });
-        }
-
-        key(month) { return this.prefix + month; }
-
-        read(month) {
-            try { return JSON.parse(storage.get(this.key(month))); } catch { return null; }
-        }
-
-        write(month, notes) {
-            try {
-                storage.set(this.key(month), JSON.stringify(notes));
-            } catch {
-                throw new BoardError('The demo board is out of browser storage. Try "Wipe this month\'s board".');
-            }
-        }
-
-        purgeOldMonths(month) {
-            for (const k of storage.keys()) {
-                if (k.startsWith(this.prefix) && k !== this.key(month)) storage.remove(k);
-            }
-        }
-
-        async list(month) {
-            this.purgeOldMonths(month);
-            let notes = this.read(month);
-            if (!Array.isArray(notes)) {
-                notes = makeSeedNotes();
-                this.write(month, notes);
-            }
-            return notes;
-        }
-
-        async create(month, data) {
-            const notes = await this.list(month);
-            if (notes.some((n) => n.deviceId === data.deviceId)) {
-                throw new BoardError('This device has already posted a note this month.');
-            }
-            if (data.type === 'text' && (!data.content.trim() || data.content.length > CONFIG.textLimit)) {
-                throw new BoardError('Text notes need 1 to 256 characters.');
-            }
-            const note = {
-                id: uid(),
-                deviceId: data.deviceId,
-                type: data.type,
-                content: data.content,
-                paper: data.paper,
-                x: clamp(data.x, -CONFIG.worldLimit, CONFIG.worldLimit),
-                y: clamp(data.y, -CONFIG.worldLimit, CONFIG.worldLimit),
-                rot: normDeg(data.rot),
-                z: maxZ(notes) + 1,
-                createdAt: Date.now(),
-                bumpedOn: dayKey(),
-            };
-            notes.push(note);
-            this.write(month, notes);
-            return note;
-        }
-
-        async update(month, id, deviceId, patch) {
-            const notes = await this.list(month);
-            const note = notes.find((n) => n.id === id);
-            if (!note || note.deviceId !== deviceId) throw new BoardError('You can only move your own note.');
-            note.x = clamp(patch.x, -CONFIG.worldLimit, CONFIG.worldLimit);
-            note.y = clamp(patch.y, -CONFIG.worldLimit, CONFIG.worldLimit);
-            note.rot = normDeg(patch.rot);
-            this.write(month, notes);
-            return note;
-        }
-
-        async bump(month, id, deviceId) {
-            const notes = await this.list(month);
-            const note = notes.find((n) => n.id === id);
-            if (!note || note.deviceId !== deviceId) throw new BoardError('You can only bump your own note.');
-            if (note.bumpedOn === dayKey()) throw new BoardError('You already bumped today. Come back tomorrow.');
-            note.z = maxZ(notes) + 1;
-            note.bumpedOn = dayKey();
-            this.write(month, notes);
-            return note;
-        }
-
-        subscribe(fn) { this.listeners.add(fn); }
-
-        // Demo-only helpers
-        async debugPatch(month, id, patch) {
-            const notes = await this.list(month);
-            const note = notes.find((n) => n.id === id);
-            if (note) Object.assign(note, patch);
-            this.write(month, notes);
-        }
-
-        async debugAdd(month, note) {
-            const notes = await this.list(month);
-            notes.push({ ...note, id: uid(), z: maxZ(notes) + 1, createdAt: Date.now(), bumpedOn: '' });
-            this.write(month, notes);
-        }
-
-        async debugWipe(month) {
-            storage.remove(this.key(month));
-        }
-    }
-
-    const maxZ = (notes) => notes.reduce((m, n) => Math.max(m, n.z || 0), 0);
-
     // ---- Image helpers ----
 
     const webpSupported = (() => {
@@ -243,71 +88,6 @@
         ctx.lineJoin = 'round';
         drawFn(ctx, size);
         return encodeCanvas(c);
-    }
-
-    function makeSeedNotes() {
-        const sun = renderSquare((x, S) => {
-            x.fillStyle = paperColor('yellow');
-            x.fillRect(0, 0, S, S);
-            x.strokeStyle = '#c0392b';
-            x.lineWidth = 14;
-            const path = new Path2D();
-            path.arc(S / 2, S / 2, S * 0.18, 0, Math.PI * 2);
-            for (let i = 0; i < 12; i++) {
-                const a = (i * Math.PI) / 6;
-                path.moveTo(S / 2 + Math.cos(a) * S * 0.26, S / 2 + Math.sin(a) * S * 0.26);
-                path.lineTo(S / 2 + Math.cos(a) * S * 0.38, S / 2 + Math.sin(a) * S * 0.38);
-            }
-            x.stroke(path);
-        });
-        const heart = renderSquare((x, S) => {
-            x.fillStyle = paperColor('pink');
-            x.fillRect(0, 0, S, S);
-            x.strokeStyle = '#2b2a22';
-            x.lineWidth = 12;
-            const path = new Path2D();
-            path.moveTo(S * 0.5, S * 0.78);
-            path.bezierCurveTo(S * 0.1, S * 0.5, S * 0.2, S * 0.18, S * 0.5, S * 0.36);
-            path.bezierCurveTo(S * 0.8, S * 0.18, S * 0.9, S * 0.5, S * 0.5, S * 0.78);
-            x.stroke(path);
-        });
-        const photo = renderSquare((x, S) => {
-            const sky = x.createLinearGradient(0, 0, 0, S);
-            sky.addColorStop(0, '#f6a35b');
-            sky.addColorStop(0.6, '#f6d38b');
-            x.fillStyle = sky;
-            x.fillRect(0, 0, S, S);
-            const sunPath = new Path2D();
-            sunPath.arc(S * 0.62, S * 0.55, S * 0.12, 0, Math.PI * 2);
-            x.fillStyle = '#fff3c4';
-            x.fill(sunPath);
-            const hills = new Path2D();
-            hills.moveTo(0, S * 0.7);
-            hills.quadraticCurveTo(S * 0.3, S * 0.5, S * 0.6, S * 0.72);
-            hills.quadraticCurveTo(S * 0.85, S * 0.62, S, S * 0.7);
-            hills.lineTo(S, S);
-            hills.lineTo(0, S);
-            hills.closePath();
-            x.fillStyle = '#2f5a2a';
-            x.fill(hills);
-        });
-
-        return [
-            { type: 'text', paper: 'yellow', content: 'first!! (probably)', x: -430, y: -230, rot: -7 },
-            { type: 'draw', paper: 'yellow', content: sun, x: -310, y: -150, rot: 6 },
-            { type: 'text', paper: 'green', content: 'the moss is listening. say something nice.', x: 400, y: -240, rot: 4 },
-            { type: 'photo', paper: 'cream', content: photo, x: 470, y: 120, rot: -4 },
-            { type: 'text', paper: 'blue', content: 'who nailed that box to the middle of the board?', x: -470, y: 210, rot: 3 },
-            { type: 'draw', paper: 'pink', content: heart, x: 130, y: 360, rot: -9 },
-            { type: 'text', paper: 'cream', content: 'october again. leaves everywhere. i hope you are doing okay, whoever you are.', x: -60, y: -400, rot: 2 },
-        ].map((n, i) => ({
-            ...n,
-            id: `seed-${i}`,
-            deviceId: `seed-device-${i}`,
-            z: i + 1,
-            createdAt: Date.now(),
-            bumpedOn: '',
-        }));
     }
 
     // ---- Geometry ----
@@ -342,17 +122,16 @@
     // ---- State ----
 
     const cloudConfig = window.STICKY_BOARD_CONFIG || {};
-    const demo = new URLSearchParams(location.search).get('demo') === '1' || (location.protocol === 'file:' && !cloudConfig.apiUrl);
-    const store = demo ? new LocalDemoStore() : new window.CloudBoardStore(cloudConfig);
+    const store = new window.CloudBoardStore(cloudConfig);
     const state = {
         month: monthKey(),
-        deviceId: getDeviceId(),
+        deviceId: null,
         notes: [],
         active: null, // { kind: 'draft' | 'move', note }
         showGhost: false,
         origin: { x: 0, y: 0 },
         busy: false,
-        available: demo,
+        available: false,
         loadError: '',
     };
 
@@ -569,7 +348,7 @@
         const bumpBtn = $('sb-bump-btn');
         const moveBtn = $('sb-move-btn');
         const status = $('sb-hub-status');
-        const claimed = !store.isDemo && store.hasPosted && !mine;
+        const claimed = store.hasPosted && !mine;
 
         createBtn.hidden = !!mine;
         createBtn.disabled = drafting || state.busy || !state.available || claimed;
@@ -654,16 +433,14 @@
             state.notes = await store.list(state.month);
             state.available = true;
             state.loadError = '';
-            if (!store.isDemo) {
-                clockOffset = store.clockOffset;
-                state.deviceId = store.identity.deviceId;
-                if (state.month !== store.month) {
-                    state.active = null;
-                    state.showGhost = false;
-                    composer.reset();
-                }
-                state.month = store.month;
+            clockOffset = store.clockOffset;
+            state.deviceId = store.identity.deviceId;
+            if (state.month !== store.month) {
+                state.active = null;
+                state.showGhost = false;
+                composer.reset();
             }
+            state.month = store.month;
         } catch (err) {
             console.error(err);
             state.loadError = err.message || 'Could not load the board.';
@@ -966,7 +743,6 @@
     });
 
     $('sb-help-btn').addEventListener('click', () => {
-        $('sb-demo-tools').hidden = !store.isDemo;
         $('sb-help').showModal();
     });
 
@@ -1239,64 +1015,22 @@
         };
     })();
 
-    // ---- Demo tools ----
-
-    $('sb-demo-tools').addEventListener('click', async (e) => {
-        const btn = e.target.closest('[data-demo]');
-        if (!btn) return;
-        const mine = myNote();
-        switch (btn.dataset.demo) {
-            case 'cover':
-                if (!mine) return toast('Post a note first.');
-                await store.debugAdd(state.month, {
-                    deviceId: `stranger-${uid()}`,
-                    type: 'text',
-                    paper: PAPERS[Math.floor(Math.random() * PAPERS.length)].id,
-                    content: 'sorry, was this spot taken?',
-                    x: mine.x + 60,
-                    y: mine.y + 40,
-                    rot: Math.round(Math.random() * 16 - 8),
-                });
-                toast('A stranger pinned a note on top of yours.');
-                break;
-            case 'tomorrow':
-                if (!mine) return toast('Post a note first.');
-                await store.debugPatch(state.month, mine.id, { bumpedOn: '' });
-                toast("It's tomorrow (sort of). You can bump again.");
-                break;
-            case 'device':
-                state.deviceId = getDeviceId(true);
-                state.active = null;
-                state.showGhost = false;
-                toast('You are now a brand-new device.');
-                break;
-            case 'wipe':
-                await store.debugWipe(state.month);
-                state.active = null;
-                state.showGhost = false;
-                toast('Board wiped.');
-                break;
-            default:
-                return;
-        }
-        $('sb-help').close();
-        await reload();
-    });
-
     // ---- Boot ----
 
     async function init() {
         if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
         renderHub();
+        updateWorld();
+        centerView();
+        $('sb-loading').hidden = false;
+        viewport.setAttribute('aria-busy', 'true');
         try {
             state.notes = await store.list(state.month);
             state.available = true;
             state.loadError = '';
-            if (!store.isDemo) {
-                clockOffset = store.clockOffset;
-                state.deviceId = store.identity.deviceId;
-                state.month = store.month;
-            }
+            clockOffset = store.clockOffset;
+            state.deviceId = store.identity.deviceId;
+            state.month = store.month;
         } catch (err) {
             console.error(err);
             state.loadError = err.message || 'Could not load the board.';
@@ -1311,8 +1045,10 @@
         }
         updateWorld();
         centerView();
+        $('sb-loading').hidden = true;
+        viewport.setAttribute('aria-busy', 'false');
 
-        if (store.isDemo || cloudConfig.apiUrl) store.subscribe(() => reload());
+        if (cloudConfig.apiUrl) store.subscribe(() => reload());
         window.addEventListener('sticky-board-sync-error', () => {
             toast('Live updates interrupted. Reconnecting to the shared board.');
         });
@@ -1323,24 +1059,7 @@
             renderCompactHub();
         }, { root: viewport }).observe(hub.querySelector('.sb-hub-main'));
 
-        // Watch for midnight: new day re-enables bumping, a new month wipes the board.
-        setInterval(() => {
-            if (!store.isDemo) {
-                renderHub();
-                return;
-            }
-            const month = monthKey();
-            if (month !== state.month) {
-                state.month = month;
-                state.active = null;
-                state.showGhost = false;
-                composer.reset();
-                toast('A new month! The board has been wiped clean.');
-                reload();
-            } else {
-                renderHub();
-            }
-        }, 30000);
+        setInterval(renderHub, 30000);
     }
 
     init();

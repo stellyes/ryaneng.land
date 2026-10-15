@@ -11,6 +11,11 @@
   <body class="sb-page">
     <button class="sb-back sb-box" id="sb-back" type="button" aria-label="Go back">&larr; Back</button>
 
+    <div id="sb-loading" class="sb-loading sb-box" role="status" hidden>
+      <span>Loading the shared board&hellip;</span>
+      <div class="sb-loading-track" role="progressbar" aria-label="Loading the shared board"></div>
+    </div>
+
     <main id="sb-viewport" class="sb-viewport" aria-label="Sticky note board">
       <div id="sb-world" class="sb-world">
         <div id="sb-notes" class="sb-layer"></div>
@@ -127,16 +132,6 @@
         <li><strong>Away from the center,</strong> compact note controls appear at the bottom. While you move your note, placement controls replace them.</li>
         <li><strong>On phones and tablets,</strong> swipe across the board to explore. Back stays at the top left, and placement controls stay at the bottom while you move your note.</li>
       </ul>
-      <section id="sb-demo-tools" class="sb-demo" hidden>
-        <h3>Demo tools</h3>
-        <p>This demo keeps the board in your browser only, so you're the only one who sees it. These buttons fake other visitors and the passage of time.</p>
-        <div class="sb-demo-buttons">
-          <button type="button" class="sb-btn sb-small" data-demo="cover">A stranger covers my note</button>
-          <button type="button" class="sb-btn sb-small" data-demo="tomorrow">Pretend it's tomorrow</button>
-          <button type="button" class="sb-btn sb-small" data-demo="device">Act as a new device</button>
-          <button type="button" class="sb-btn sb-small" data-demo="wipe">Wipe this month's board</button>
-        </div>
-      </section>
       <div class="sb-dialog-foot">
         <button type="button" class="sb-btn sb-primary" data-close>Got it</button>
       </div>

@@ -1,7 +1,7 @@
 :root {
     --cream: rgb(241, 218, 168);
     --moss: rgb(14, 56, 2);
-    --panel: rgba(8, 30, 4, 0.94);
+    --panel: rgba(0, 0, 0, 0.90);
     --ink: #2b2a22;
     --note: 200px;
 }
@@ -48,7 +48,7 @@ textarea {
     min-height: 44px;
     padding: 0.6em 1.1em;
     border: 1px solid var(--cream);
-    background: var(--moss);
+    background: var(--panel);
     font-size: 1.05rem;
     letter-spacing: 1px;
     cursor: pointer;
@@ -282,6 +282,46 @@ textarea {
     }
 }
 
+.sb-loading {
+    position: fixed;
+    top: calc(5rem + env(safe-area-inset-top, 0px));
+    left: 50%;
+    z-index: 40000001;
+    width: min(20rem, calc(100vw - 2rem));
+    padding: 0.8rem 1rem;
+    text-align: center;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
+.sb-loading-track {
+    height: 4px;
+    margin-top: 0.65rem;
+    overflow: hidden;
+    background: rgba(241, 218, 168, 0.2);
+}
+
+.sb-loading-track::before {
+    content: '';
+    display: block;
+    width: 40%;
+    height: 100%;
+    background: var(--cream);
+    animation: sb-loading 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes sb-loading {
+    from { transform: translateX(0); }
+    to { transform: translateX(150%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .sb-loading-track::before {
+        width: 100%;
+        animation: none;
+    }
+}
+
 /* Center hub */
 .sb-hub {
     position: absolute;
@@ -409,7 +449,7 @@ textarea {
     max-height: calc(100vh - 1.5rem);
     padding: 1.1rem 1.25rem 1.25rem;
     border: 1px solid var(--cream);
-    background: #0b2a05;
+    background: var(--panel);
     color: var(--cream);
 }
 
@@ -598,18 +638,6 @@ textarea {
     margin: 0.6rem 0 0;
     color: #ffb4a2;
     text-align: center;
-}
-
-.sb-demo {
-    margin-top: 1rem;
-    padding-top: 0.75rem;
-    border-top: 1px dashed rgba(241, 218, 168, 0.5);
-}
-
-.sb-demo-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
 }
 
 .sb-noscript {
