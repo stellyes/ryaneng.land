@@ -10,37 +10,45 @@ I'm one guy with a ton of different hobbies. I have no interest in developing/ma
 
 For the blog. I'm using pagedown (https://github.com/StackExchange/pagedown). Same MD -> HTML converter used by the one and only StackOverflow. RIP.
 
-Code, Blog, and Art share the `post-list` styles: right-aligned titles, dates,
-and descriptions, with divider lines between entries. Each page also has a
-centered section header with black text on a tan background on its listing.
-Individual Blog and Art posts omit this section header. Blog and Art entries
-come from their respective JSON indexes; Code entries are maintained in
-`code.html`, with dates stored in each `<time datetime="YYYY-MM-DD">` element.
+## Sticky board
 
-The Code listing links to a large, generative canvas garden on `code/garden.html`.
-The garden is public and requires no access code or API connection. It grows on its
-own; mouse and touch input accelerate growth and encourage branching. Focus the
-canvas and use arrow keys or Space for keyboard control. The attached reset
-button clears all growth and plants 3-7 fresh seeds randomly across the canvas.
-Reduced-motion preferences
-disable automatic growth in favor of input-driven bursts. Growth pauses off
-screen and in hidden tabs, and is capped to keep long visits responsive.
-Resizing preserves the garden. Its standalone styles and behavior are in
-`assets/css/garden.css` and `assets/js/garden.js`; no build step or external
-libraries are needed.
-Automatic growth runs at six steps per second, one-fifth of the original rate;
-input-driven bursts use the same one-fifth scale.
-Each growth step is one-third of its original length, including pointer-boosted
-growth.
-Automatic growth is interpolated across animation frames: stems extend smoothly
-between simulation steps and new leaves and blooms fade in. Finished growth is
-cached on a separate canvas to avoid redrawing the entire garden each frame.
-Input-driven bursts remain immediate, including in reduced-motion mode.
+The [sticky board](code/sticky-board.html) uses a separate AWS serverless backend.
+See [backend setup and operations](services/sticky-board/README.md) for its API,
+limits, moderation, and deployment details.
 
-## Publishing
+Deploy using `scripts/deploy-sticky-board.ps1` after authenticating the AWS CLI.
+The script writes only public endpoints to `assets/js/sticky-board-config.js`.
+Publish that configuration together with the frontend using the existing Pages
+workflow. Deployment does not publish the GitHub Pages site or commit changes.
+The stack defaults to `sticky-board-west` in `us-west-2` and the allowed production origin
+`https://ryaneng.land`.
 
-GitHub Pages uses the **Publish Website** Actions workflow. Before running it,
-set repository Actions **variables** `IMAGE_TOOLS_API_URL` and
-`RECAPTCHA_SITE_KEY`; the ignored local `.env` is not uploaded to GitHub.
-See [GitHub Pages setup](services/image-converter/README.md#github-pages-setup)
-for the exact settings and rerun steps.
+Pass `-NotificationEmail <address>` to enable account-wide monthly cost alerts
+at $5, $15, and $30, plus broadcast-health alarm notifications. Confirm the SNS
+subscription email to receive health alerts. Budgets are delayed notifications,
+not spending caps, and include other AWS services in the account.
+
+The page uses the shared AWS backend exclusively and reports configuration/network errors instead of substituting a private board. Serve it through an allowed HTTP origin; there is no local-file or demo mode.
+
+Owners are anonymous browser identities, not physically identifiable devices.
+Keep browser storage to retain ownership of your note. Clearing it or changing
+browsers creates a different identity. Server-side ownership, monthly submission
+claims, daily bump limits, and optimistic note versions protect normal use;
+rate limits reduce but cannot eliminate determined anonymous abuse.
+
+Committed changes are broadcast over WebSockets; dragging is a local preview
+until Save. A disconnected visible page falls back to revision checks every ten
+seconds. Connected pages reconcile every thirty seconds and after reconnecting.
+Images are uploaded separately and served through CloudFront, never sent through
+the real-time connection.
+
+For frontend adapter tests, serve the repository locally and open
+`tests/sticky-board-store.html`. It uses mock requests and restores any existing
+local board identity after the tests.
+
+`tests/smoke-sticky-board.py --api <ApiUrl>` exercises the deployed API, including
+idempotency, monthly quotas, version conflicts, anonymous authentication, and IAM
+moderation. It creates a temporary note and removes it in a `finally` block.
+The test requires AWS credentials with admin invoke permission and the backend's
+prepared build dependencies. Device claims are intentionally retained for the
+month; repeated smoke runs also consume the normal device-issuance rate limit.
