@@ -10,6 +10,53 @@ I'm one guy with a ton of different hobbies. I have no interest in developing/ma
 
 For the blog. I'm using pagedown (https://github.com/StackExchange/pagedown). Same MD -> HTML converter used by the one and only StackOverflow. RIP.
 
+## Pattern Studio (local demo)
+
+[Pattern Studio](tools/pattern-studio/index.html) is a dependency-free JavaScript
+pixel-art / tapestry crochet editor for tablet and desktop viewports (768px+).
+Serve the repository over HTTP (localhost) or HTTPS; no build or backend is needed.
+The existing Pages publishing workflow includes the tool automatically.
+The editor loads the shared site stylesheet for its Warbler/Sabbath Black fonts,
+gold text, forest-green texture, and dark panels. Its compact bottom-right zoom
+controls stay on one row.
+
+- Upload PNG, JPEG, WebP or GIF (20 MB maximum; animated images use a still frame),
+  or try the built-in sample. The stored reference is resized to a longest edge
+  of at most 500 pixels.
+- Paint by click, stylus, or drag, use connected four-neighbor bucket fill,
+  erase individual cells, or erase a connected color block. Arrow keys and Space
+  provide keyboard painting. Undo/redo includes strokes, fills, and grid resizing.
+  Use Ctrl+Z to undo and Ctrl+Shift+Z to redo (Command on Mac), or the toolbar
+  buttons. Shortcuts leave text/form editing and open dialogs alone.
+- Enlarge the display from 100% (fit) to 800% using just the +/- buttons
+  docked at the bottom-right of the workspace, outside the scrolling canvas.
+  Scroll horizontally/vertically to reach enlarged cells; zoom out to the minimum
+  to fit the view. Zoom preserves the view center and does not alter the grid, saved
+  painting, undo history, or export dimensions. Opening a project resets zoom.
+- Create a palette of up to 32 colors. The grid-size toggle exposes a 4-500 cell
+  longest-side slider. Applying it nearest-neighbor resamples existing paint;
+  row/column counts round to whole cells while the canvas retains reference proportions.
+- Projects autosave to IndexedDB after edits and can be reopened in Projects.
+  Only the resized reference is retained, not the original upload.
+  Browser saves are device/origin-specific and can be cleared or evicted;
+  use Download project for portable JSON backups, then Import project backup
+  to restore an editable copy. Storage failures are shown explicitly, and
+  unsaved changes trigger a navigation warning where browsers support it.
+- Export PNG/WebP with transparent unpainted cells, or JPG with a chosen
+  background. Only painted cells are rendered, without reference or gridlines.
+  Scale choices are 1/10/20 pixels per cell on the longest side, capped at 5,000px.
+  JPEG is lossy; PNG is recommended for exact pixel colors.
+
+No cloud service, account, tracking, or image upload is used. AWS integration
+is deliberately deferred; any future cloud saving must be opt-in with explicit
+image-storage and personal-use consent. This is a manual drawing demo, not
+automatic image tracing or a written crochet-instruction generator.
+Avoid editing the same saved project in multiple tabs simultaneously.
+
+For model/storage tests, serve the repository locally and open
+[tests/pattern-studio.html](tests/pattern-studio.html). The tests use an isolated,
+temporary IndexedDB database and remove it afterwards.
+
 ## Sticky board
 
 The [sticky board](code/sticky-board.html) uses a separate AWS serverless backend.

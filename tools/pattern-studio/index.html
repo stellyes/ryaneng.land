@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pattern Studio - Ryan's Code</title>
+  <link rel="stylesheet" href="../../style.css">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <section class="small-screen">
+    <h1>A little more room to stitch.</h1>
+    <p>I only enable Pattern Studio for larger screens. Please visit on a tablet or desktop with a viewport at least 768px wide.</p>
+    <a href="../../code.html">Back to Code</a>
+  </section>
+  <main id="studio">
+    <header>
+      <div><a class="back" href="../../code.html">&larr; Ryan's Code</a><h1>Pattern Studio <span>LOCAL DEMO</span></h1></div>
+      <div class="project-actions">
+        <button id="projects" type="button">Projects</button>
+        <button id="backup" type="button" disabled>Download project</button>
+        <button id="export" type="button" disabled class="primary">Export pattern</button>
+      </div>
+    </header>
+    <section class="toolbar" aria-label="Pattern controls">
+      <label class="name-label">Project <input id="name" maxlength="80" value="Untitled pattern" disabled></label>
+      <div class="tools" role="group" aria-label="Painting tools">
+        <button data-tool="paint" aria-pressed="true" disabled>Paint</button>
+        <button data-tool="fill" aria-pressed="false" disabled>Bucket fill</button>
+        <button data-tool="erase" aria-pressed="false" disabled>Eraser</button>
+        <button data-tool="erase-fill" aria-pressed="false" disabled>Erase block</button>
+      </div>
+      <button id="undo" title="Undo (Ctrl+Z / Command+Z)" aria-keyshortcuts="Control+z Meta+z" disabled>Undo</button>
+      <button id="redo" title="Redo (Ctrl+Shift+Z / Command+Shift+Z)" aria-keyshortcuts="Control+Shift+z Meta+Shift+z" disabled>Redo</button>
+      <button id="grid-toggle" aria-expanded="false" aria-controls="grid-settings" disabled>Grid size</button>
+      <label class="check"><input id="reference-toggle" type="checkbox" checked disabled> Reference</label>
+      <label class="check"><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
+    </section>
+    <section id="grid-settings" class="grid-settings" hidden>
+      <label for="grid-size">Cells on longest side <output id="grid-value">50</output></label>
+      <input id="grid-size" type="range" min="4" max="500" value="50">
+      <button id="apply-grid">Apply size</button>
+      <p>Image proportions stay fixed; row/column counts round to whole cells. Resizing resamples your painting. Undo restores it.</p>
+    </section>
+    <section class="palette-bar" aria-label="Color palette">
+      <strong>Thread palette</strong>
+      <div id="palette" role="group" aria-label="Select a paint color"></div>
+      <label class="color-label">New color <input id="new-color" type="color" value="#bb543d"></label>
+      <button id="add-color">Add color</button>
+      <span id="selected-color"></span>
+    </section>
+    <div class="workspace-area">
+    <section id="workspace" aria-label="Pattern workspace">
+      <div id="empty">
+        <div class="empty-grid" aria-hidden="true"></div>
+        <p class="eyebrow">FROM IMAGE TO STITCH</p>
+        <h2>Make something, one pixel at a time.</h2>
+        <p>Bring a reference. Pick your threads. Paint your own pattern.</p>
+        <button id="upload" class="primary">Choose reference image</button>
+        <button id="demo">Try a sample</button>
+        <p class="fine">PNG, JPEG, WebP or GIF &middot; up to 20 MB<br>Reference resized to a maximum of 500 pixels. Nothing is uploaded.</p>
+      </div>
+      <div id="canvas-wrap" hidden>
+        <canvas id="canvas" tabindex="0" aria-label="Pattern editor. Use arrow keys to choose a cell and Space to apply the selected tool." aria-describedby="help"></canvas>
+      </div>
+    </section>
+    <section class="zoom-bar" aria-label="Display zoom">
+      <span>Zoom Controls</span>
+      <button id="zoom-out" aria-label="Zoom out" aria-describedby="zoom-help" title="Zoom out" disabled>&minus;</button>
+      <button id="zoom-in" aria-label="Zoom in" aria-describedby="zoom-help" title="Zoom in" disabled>+</button>
+      <span id="zoom-help" class="visually-hidden">Scroll to explore when zoomed in. Display only; exports stay unchanged.</span>
+    </section>
+    </div>
+    <footer><span id="dimensions">No pattern open</span><p id="help">Drag to paint &middot; Arrow keys + Space also paint &middot; Ctrl/Cmd+Z: undo &middot; Ctrl/Cmd+Shift+Z: redo</p><span id="save-state">Stored only in this browser</span></footer>
+    <p id="message" role="status" aria-live="polite"></p>
+    <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+    <input id="project-file" type="file" accept=".json,application/json" hidden>
+  </main>
+  <dialog id="project-dialog" aria-labelledby="projects-title">
+    <div class="dialog-heading"><h2 id="projects-title">Your projects</h2><button data-close="project-dialog" aria-label="Close projects">Close</button></div>
+    <p>Saved on this browser, on this device. Download a project backup to keep it safe or move it elsewhere. Clearing site data removes browser saves.</p>
+    <div class="project-actions"><button id="new-project" class="primary">New from image</button><button id="import-project">Import project backup</button><button id="save-now">Save now</button></div>
+    <div id="project-list"></div>
+    <p class="dialog-message" role="status" aria-live="polite"></p>
+    <p class="fine">No accounts, AWS, analytics, or cloud image storage. This demo does not send your images anywhere.</p>
+  </dialog>
+  <dialog id="export-dialog" aria-labelledby="export-title">
+    <div class="dialog-heading"><h2 id="export-title">Export your pattern</h2><button data-close="export-dialog">Close</button></div>
+    <p>Only your painted cells. No reference image, no gridlines.</p>
+    <label>Format <select id="format"><option value="png">PNG</option><option value="webp">WebP</option><option value="jpeg">JPG</option></select></label>
+    <label>Pixels per cell <select id="export-scale"><option value="1">1 (pixel art)</option><option value="10" selected>10</option><option value="20">20</option></select></label>
+    <label>Background for JPG <input id="export-background" type="color" value="#ffffff"></label>
+    <p class="fine">PNG and WebP keep unpainted cells transparent. JPG uses the chosen background. Exports are limited to a 5,000px longest edge.</p>
+    <button id="download-image" class="primary">Download image</button>
+    <p class="dialog-message" role="status" aria-live="polite"></p>
+  </dialog>
+  <noscript>Enable JavaScript to use Pattern Studio. Your images stay on your device.</noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Pattern Studio tests</title></head>
+<body>
+<h1>Pattern Studio model and storage tests</h1>
+<pre id="results">Running...</pre>
+<script type="module">
+import { gridDimensions, resizeCells, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
+const results = [];
+const assert = (condition, name) => {
+    if (!condition) throw new Error(name);
+    results.push(`PASS ${name}`);
+};
+const rejects = (run, name) => {
+    let threw = false;
+    try { run(); } catch { threw = true; }
+    assert(threw, name);
+};
+const database = `pattern-studio-test-${crypto.randomUUID()}`;
+let store;
+try {
+    assert(JSON.stringify(gridDimensions(500, 250, 50)) === '{"cols":50,"rows":25}', 'Landscape grid preserves proportions');
+    assert(JSON.stringify(gridDimensions(250, 500, 50)) === '{"cols":25,"rows":50}', 'Portrait grid preserves proportions');
+    assert(gridDimensions(500, 1, 4).rows === 1, 'Very thin references keep at least one row');
+    assert(gridDimensions(499, 333, 500).cols === 500, 'Grid supports the 500-cell maximum');
+    const cells = ['#000000', '#ffffff', '#000000', '#ffffff'];
+    flood(cells, 2, 2, 0, 0, '#ff0000');
+    assert(cells.join(',') === '#ff0000,#ffffff,#ff0000,#ffffff', 'Bucket changes only connected target color');
+    assert(!flood(cells, 2, 2, 0, 0, '#ff0000'), 'Filling with the same color is a no-op');
+    flood(cells, 2, 2, 1, 0, null);
+    assert(cells[1] === null && cells[3] === null && cells[0] === '#ff0000', 'Erase block clears only connected target color');
+    const diagonal = ['#000000', null, null, '#000000'];
+    flood(diagonal, 2, 2, 0, 0, null);
+    assert(diagonal[3] === '#000000', 'Diagonal cells are not connected');
+    const edge = [null, '#ffffff', '#ffffff', null];
+    flood(edge, 2, 2, 1, 0, '#ff0000');
+    assert(edge[2] === '#ffffff', 'Fill does not wrap across row boundaries');
+    const full = Array(250000).fill(null);
+    flood(full, 500, 500, 0, 0, '#123456');
+    assert(full.every(color => color === '#123456'), 'Maximum-size fill completes without recursion overflow');
+    const visited = [];
+    line(0, 0, 8, 2, (x, y) => visited.push([x, y]));
+    assert(visited.length === 9 && visited[8][0] === 8 && visited[8][1] === 2, 'Swipe interpolation includes both ends with no horizontal gaps');
+    const reverse = [];
+    line(2, 8, 0, 0, (x, y) => reverse.push([x, y]));
+    assert(reverse.length === 9 && reverse[8].join() === '0,0', 'Reverse vertical swipe interpolation');
+    const resized = resizeCells(['#000000', null, null, '#ffffff'], 2, 2, 4, 4);
+    assert(resized[0] === '#000000' && resized[3] === null && resized[15] === '#ffffff', 'Grid resizing preserves paint and transparent cells');
+    const record = {
+        version: 1, id: 'test-project', name: 'Test', width: 2, height: 2, cols: 2, rows: 2,
+        palette: ['#000000'], cells: ['#000000', null, null, null],
+        reference: 'data:image/png;base64,AAAA', updatedAt: Date.now(),
+    };
+    assert(validateProject(record) === record, 'Valid project schema accepted');
+    rejects(() => validateProject({ ...record, width: 501 }), 'Oversized references rejected');
+    rejects(() => validateProject({ ...record, cols: 501 }), 'Oversized grids rejected');
+    rejects(() => validateProject({ ...record, cells: [] }), 'Wrong cell count rejected');
+    rejects(() => validateProject({ ...record, cells: ['red', null, null, null] }), 'Invalid paint colors rejected');
+    rejects(() => validateProject({ ...record, reference: 'https://example.com/image.png' }), 'Remote reference URLs rejected');
+    rejects(() => validateProject({ ...record, palette: [] }), 'Empty palettes rejected');
+    rejects(() => validateProject({ ...record, width: 2, height: 1 }), 'Mismatched grid proportions rejected');
+    rejects(() => validateProject({ ...record, version: 2 }), 'Unknown project version rejected');
+    store = await openStore(database);
+    await store.run('readwrite', table => table.put(record));
+    const saved = await store.run('readonly', table => table.get(record.id));
+    assert(saved.cells[0] === '#000000' && saved.cells[1] === null && saved.reference === record.reference, 'IndexedDB round trip retains painting, transparency and reference');
+    await store.run('readwrite', table => table.put({ ...record, name: 'Updated' }));
+    const listed = await store.run('readonly', table => table.getAll());
+    assert(listed.length === 1 && listed[0].name === 'Updated', 'Saving updates rather than duplicates a project');
+    await store.run('readwrite', table => table.delete(record.id));
+    assert((await store.run('readonly', table => table.getAll())).length === 0, 'Deleting removes a saved project');
+    document.body.dataset.result = 'passed';
+} catch (error) {
+    results.push(`FAIL ${error.stack}`);
+    document.body.dataset.result = 'failed';
+} finally {
+    if (store) store.close();
+    indexedDB.deleteDatabase(database);
+    document.getElementById('results').textContent = results.join('\n');
+}
+</script>
+</body>
+</html>

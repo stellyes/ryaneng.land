@@ -1,6 +1,11 @@
 @import url('assets/css/fonts.css');
 
 :root {
+    --site-font-body: 'Warbler', Georgia, serif;
+    --site-font-heading: 'Sabbath Black', Georgia, serif;
+    --site-color-text: rgb(241, 218, 168);
+    --site-color-background: rgb(14, 56, 2);
+    --site-color-panel: rgba(0, 0, 0, 0.95);
     --title-size: 128px;
     --item-size: 36px;
     --image-height: 60vh;
@@ -17,8 +22,8 @@
 * {
     margin: 0;
     padding: 0;
-    font-family: 'Warbler';
-    color: rgb(241, 218, 168);
+    font-family: var(--site-font-body);
+    color: var(--site-color-text);
 }
 
 body {
@@ -29,7 +34,7 @@ body {
     align-items: center;
     background-image: url('assets/img/forest-floor-texture.webp');
     background-size: 35%;
-    background-color:rgb(14, 56, 2);
+    background-color: var(--site-color-background);
     background-blend-mode: darken;
     
 }
