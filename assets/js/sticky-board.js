@@ -220,14 +220,42 @@
         pinnedCenter = false;
     }
 
-    function centerView() {
+    // Absolute target from world-relative geometry, so it's correct even if the reported scroll position is stale.
+    function centerTarget() {
         const panel = hub.querySelector('.sb-hub-main').getBoundingClientRect();
-        const rect = viewport.getBoundingClientRect();
-        viewport.scrollBy(
-            panel.left + panel.width / 2 - rect.left - viewport.clientWidth / 2,
-            panel.top + panel.height / 2 - rect.top - viewport.clientHeight / 2,
-        );
+        const w = world.getBoundingClientRect();
+        return {
+            left: Math.round(panel.left - w.left + panel.width / 2 - viewport.clientWidth / 2),
+            top: Math.round(panel.top - w.top + panel.height / 2 - viewport.clientHeight / 2),
+        };
     }
+
+    function centerView() {
+        const t = centerTarget();
+        viewport.scrollTo(t.left, t.top);
+    }
+
+    // iOS scrolls overflow elements in a separate process and can push an older scroll position back
+    // after a layout change. While pinned, snap back from any scroll the user didn't start.
+    let touching = 0;
+    let recenterRaf = 0;
+    const trackTouches = (e) => { touching = e.touches.length; };
+    viewport.addEventListener('touchstart', trackTouches, { passive: true });
+    viewport.addEventListener('touchend', trackTouches, { passive: true });
+    viewport.addEventListener('touchcancel', trackTouches, { passive: true });
+    viewport.addEventListener('scroll', () => {
+        if (!pinnedCenter || state.active) return;
+        if (touching) {
+            unpinCenter();
+            return;
+        }
+        cancelAnimationFrame(recenterRaf);
+        recenterRaf = requestAnimationFrame(() => {
+            if (!pinnedCenter || state.active || touching) return;
+            const t = centerTarget();
+            if (Math.abs(viewport.scrollLeft - t.left) > 1 || Math.abs(viewport.scrollTop - t.top) > 1) centerView();
+        });
+    }, { passive: true });
 
     function scrollToNote(note) {
         const de = viewport;
@@ -1167,6 +1195,8 @@
             toast('Live updates interrupted. Reconnecting to the shared board.');
         });
         window.addEventListener('resize', () => updateWorld());
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', () => updateWorld());
+        window.addEventListener('pageshow', (e) => { if (e.persisted) updateWorld(); });
         new ResizeObserver(() => updateWorld()).observe(viewport);
         new ResizeObserver(() => updateWorld()).observe(hub);
         new IntersectionObserver(([entry]) => {
