@@ -143,6 +143,7 @@ textarea {
     transform-origin: center;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
 }
 
 .sb-note-face {
