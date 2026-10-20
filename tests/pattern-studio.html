@@ -5,7 +5,9 @@
 <h1>Pattern Studio model and storage tests</h1>
 <pre id="results">Running...</pre>
 <script type="module">
-import { gridDimensions, resizeCells, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
+import { parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
+import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
+import { boxFromCells, copyCells, objectCorners, rasterObject, resizeObject, shapeMask } from '../tools/pattern-studio/objects.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -19,6 +21,80 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    const color = '#123456';
+    const box = boxFromCells({ x: 7, y: 8 }, { x: 3, y: 2 });
+    assert(box.width === 5 && box.height === 7 && box.cx === 5.5 && box.cy === 5.5, 'Object drag includes start/end cells in either direction');
+    const segment = { kind: 'line', a: { x: 1, y: 2 }, b: { x: 7, y: 4 } };
+    const linePixels = rasterObject(segment, 10, 10, color);
+    assert(linePixels.size === 7 && linePixels.get(21) === color && linePixels.get(47) === color, 'Editable line raster includes exact endpoints');
+    assert([...rasterObject(segment, 10, 10, '#abcdef').values()].every(c => c === '#abcdef'), 'Changing palette recolors every preview line cell');
+    assert(rasterObject({ kind: 'line', a: { x: 0, y: 0 }, b: { x: 0, y: 0 } }, 1, 1, color).size === 1, 'Single-cell line is supported');
+    assert(rasterObject({ kind: 'line', a: { x: -4, y: 0 }, b: { x: 4, y: 0 } }, 3, 3, color).size === 3, 'Line raster clips to grid');
+    const rect = { kind: 'shape', shape: 'rectangle', filled: true, ...boxFromCells({ x: 1, y: 1 }, { x: 5, y: 3 }) };
+    assert(rasterObject(rect, 10, 10, color).size === 15, 'Filled rectangle has exact inclusive pixel dimensions');
+    const outline = rasterObject({ ...rect, filled: false }, 10, 10, color);
+    assert(outline.size === 12 && !outline.has(22), 'Rectangle outline leaves interior untouched');
+    assert(shapeMask('ellipse', 5, 5, true).filter(Boolean).length === 21, 'Ellipse filled mask is symmetric and pixel centered');
+    for (const shape of ['rectangle', 'ellipse', 'triangle', 'star']) {
+        for (const [width, height] of [[1, 1], [1, 12], [12, 1], [11, 9]]) {
+            const filled = shapeMask(shape, width, height, true), border = shapeMask(shape, width, height, false);
+            assert(filled.length === width * height && filled.some(Boolean) && border.some(Boolean) &&
+                border.every((v, i) => !v || filled[i]), `${shape} ${width}x${height} supports filled/outline including thin shapes`);
+        }
+        const rotated = rasterObject({ ...rect, shape, width: 15, height: 13, cx: 8, cy: 8, angle: 37 }, 16, 16, color);
+        assert(rotated.size > 0 && [...rotated.keys()].every(i => i >= 0 && i < 256), `${shape} rotation stays inside destination grid`);
+    }
+    const original = { cols: 3, rows: 2, cells: ['#111111', null, '#333333', '#444444', '#555555', null] };
+    const copied = copyCells(original, boxFromCells({ x: 1, y: 0 }, { x: 2, y: 1 }));
+    assert(copied.width === 2 && copied.height === 2 && JSON.stringify(copied.cells) === JSON.stringify([null, '#333333', '#555555', null]), 'Copy retains exact dimensions, colors, and empty cells');
+    original.cells[2] = '#999999';
+    assert(copied.cells[1] === '#333333', 'Clipboard snapshot does not change when source painting changes');
+    const paste = { kind: 'paste', cx: 3, cy: 3, width: 2, height: 2, angle: 0,
+        source: { width: 2, height: 2, cells: ['#111111', '#222222', '#333333', null] } };
+    const pasted = rasterObject(paste, 6, 6, '#ffffff');
+    assert(pasted.size === 3 && pasted.get(14) === '#111111' && !pasted.has(21), 'Paste preserves original colors and leaves empty cells transparent');
+    const quarter = rasterObject({ ...paste, angle: 90 }, 6, 6, color);
+    assert(quarter.get(14) === '#333333' && quarter.get(15) === '#111111' && !quarter.has(20) && quarter.get(21) === '#222222', '90-degree paste rotation maps exact source cells around the center');
+    const enlarged = rasterObject({ ...paste, cx: 2, cy: 2, width: 4, height: 4 }, 6, 6, color);
+    assert(enlarged.size === 12 && enlarged.get(0) === '#111111' && enlarged.get(3) === '#222222', 'Pasted pixels resize with nearest-neighbor sampling');
+    assert(rasterObject({ ...paste, cx: 0, cy: 0 }, 2, 2, color).size === 0, 'Clipped empty paste cells never erase destination pixels');
+    const resizedBox = resizeObject({ ...rect, cx: 5, cy: 5, width: 4, height: 4 }, 'se', { x: 9, y: 8 });
+    assert(resizedBox.width === 6 && resizedBox.height === 5 && resizedBox.cx === 6 && resizedBox.cy === 5.5, 'Resize changes axes independently while anchoring opposite corner');
+    const turned = { ...rect, angle: 90 }, oldCorner = objectCorners(turned)[0];
+    const turnedResize = resizeObject(turned, 'se', { x: 2, y: 8 }), newCorner = objectCorners(turnedResize)[0];
+    assert(Math.abs(oldCorner.x - newCorner.x) < 1e-9 && Math.abs(oldCorner.y - newCorner.y) < 1e-9, 'Rotated resize anchors the opposite corner without moving it');
+    assert(rasterObject({ kind: 'selection', ...box }, 10, 10, color).size === 0, 'Selection border never paints into the grid');
+    assert(rasterObject({ ...rect, width: 500, height: 500, cx: 250, cy: 250, angle: 0 }, 500, 500, color).size === 250000, 'Maximum-size filled shape renders every cell');
+    for (const [text, expected] of [['50', 50], ['50.99', 50], ['4.9', 4], ['500.999', 500], ['+42.8', 42], [' 12.0 ', 12], ['49.99999999', 49], ['49.99999999999999999999', 49]]) {
+        assert(parseGridSize(text) === expected, `Grid size ${text} rounds down to ${expected}`);
+    }
+    for (const text of ['20a', 'a20', '2e2', 'NaN', 'Infinity', '', ' ', '0x20', '12px', '1,000', '3.99', '3.9999999999999999999999', '-4.2', '501', '50.2.1']) {
+        rejects(() => parseGridSize(text), `Invalid grid size "${text}" rejected`);
+    }
+    for (const [name, ratio] of Object.entries(CROP_RATIOS)) {
+        const rect = fitCrop(499, 333, ratio);
+        assert(rect.width * ratio[1] === rect.height * ratio[0], `${name} crop has exact integer-pixel proportions`);
+        assert(rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 499 && rect.y + rect.height <= 333, `${name} crop fits inside reference`);
+        const scaled = fitCrop(499, 333, ratio, 0.5);
+        assert(scaled.width < rect.width && scaled.width * ratio[1] === scaled.height * ratio[0], `${name} scale preserves ratio`);
+        for (const corner of ['nw', 'ne', 'sw', 'se']) {
+            const resized = resizeCrop(scaled, corner, -1000, 1000, 499, 333, ratio);
+            assert(resized.width > 0 && resized.height > 0 && resized.x >= 0 && resized.y >= 0 &&
+                resized.x + resized.width <= 499 && resized.y + resized.height <= 333 &&
+                resized.width * ratio[1] === resized.height * ratio[0], `${name} ${corner} resize is bounded and ratio-locked`);
+        }
+    }
+    rejects(() => fitCrop(2, 2, CROP_RATIOS.wide), 'Too-small reference rejects impossible exact preset');
+    const free = fitCrop(200, 100, null);
+    const freeSized = resizeCrop(free, 'se', -50, -20, 200, 100);
+    assert(freeSized.width === 150 && freeSized.height === 80, 'Free crop independently resizes width and height');
+    const moved = moveCrop(freeSized, 999, -999, 200, 100);
+    assert(moved.x === 50 && moved.y === 0, 'Crop movement clamps both axes to reference bounds');
+    const cropSource = { width: 4, height: 2, cols: 4, rows: 2, cells: ['#000000', '#111111', null, '#333333', '#444444', '#555555', null, '#777777'] };
+    assert(JSON.stringify(cropCells(cropSource, { x: 1, y: 0, width: 2, height: 2 }, 2, 2)) ===
+        JSON.stringify(['#111111', null, '#555555', null]), 'Cropping paint selects included cells and preserves transparency');
+    assert(JSON.stringify(cropCells(cropSource, { x: 0, y: 0, width: 4, height: 2 }, 4, 2)) ===
+        JSON.stringify(cropSource.cells), 'Full-frame paint crop is unchanged');
     assert(JSON.stringify(gridDimensions(500, 250, 50)) === '{"cols":50,"rows":25}', 'Landscape grid preserves proportions');
     assert(JSON.stringify(gridDimensions(250, 500, 50)) === '{"cols":25,"rows":50}', 'Portrait grid preserves proportions');
     assert(gridDimensions(500, 1, 4).rows === 1, 'Very thin references keep at least one row');
@@ -28,7 +104,7 @@ try {
     assert(cells.join(',') === '#ff0000,#ffffff,#ff0000,#ffffff', 'Bucket changes only connected target color');
     assert(!flood(cells, 2, 2, 0, 0, '#ff0000'), 'Filling with the same color is a no-op');
     flood(cells, 2, 2, 1, 0, null);
-    assert(cells[1] === null && cells[3] === null && cells[0] === '#ff0000', 'Erase block clears only connected target color');
+    assert(cells[1] === null && cells[3] === null && cells[0] === '#ff0000', 'Flood helper supports clearing a connected target color');
     const diagonal = ['#000000', null, null, '#000000'];
     flood(diagonal, 2, 2, 0, 0, null);
     assert(diagonal[3] === '#000000', 'Diagonal cells are not connected');

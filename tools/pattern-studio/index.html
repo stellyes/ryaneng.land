@@ -16,6 +16,8 @@
   <main id="studio">
     <header>
       <div><a class="back" href="../../code.html">&larr; Ryan's Code</a><h1>Pattern Studio <span>LOCAL DEMO</span></h1></div>
+          <p id="message" role="status" aria-live="polite"></p>
+
       <div class="project-actions">
         <button id="projects" type="button">Projects</button>
         <button id="backup" type="button" disabled>Download project</button>
@@ -24,31 +26,107 @@
     </header>
     <section class="toolbar" aria-label="Pattern controls">
       <label class="name-label">Project <input id="name" maxlength="80" value="Untitled pattern" disabled></label>
-      <div class="tools" role="group" aria-label="Painting tools">
-        <button data-tool="paint" aria-pressed="true" disabled>Paint</button>
-        <button data-tool="fill" aria-pressed="false" disabled>Bucket fill</button>
-        <button data-tool="erase" aria-pressed="false" disabled>Eraser</button>
-        <button data-tool="erase-fill" aria-pressed="false" disabled>Erase block</button>
-        <button data-tool="sample" aria-pressed="false" disabled>Color sampler</button>
+      <div class="tool-group" role="group" aria-label="Drawing tools">
+        <span class="tool-control">
+          <button class="icon-button" data-tool="paint" aria-label="Paint" aria-pressed="true" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l1-6L16 3a2 2 0 0 1 5 5L10 19zM5 14l5 5"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Paint</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="fill" aria-label="Bucket fill" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 7-7 9 9-7 7a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3ZM7 2l7 7M4 13h15M20 16s-2 3-2 4a2 2 0 0 0 4 0c0-1-2-4-2-4Z"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Bucket fill</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="erase" aria-label="Eraser" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 13 10-10a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3L11 21H8l-5-5a2 2 0 0 1 0-3ZM8 8l8 8M11 21h10"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Eraser</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="line" aria-label="Line" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 14-14"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Line</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="shape" aria-label="Shapes" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="11" height="11"/><circle cx="16" cy="16" r="6"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Shapes</span>
+        </span>
       </div>
-      <button id="undo" title="Undo (Ctrl+Z / Command+Z)" aria-keyshortcuts="Control+z Meta+z" disabled>Undo</button>
-      <button id="redo" title="Redo (Ctrl+Shift+Z / Command+Shift+Z)" aria-keyshortcuts="Control+Shift+z Meta+Shift+z" disabled>Redo</button>
-      <button id="grid-toggle" aria-expanded="false" aria-controls="grid-settings" disabled>Grid size</button>
+      <div class="tool-group" role="group" aria-label="Canvas tools">
+        <span class="tool-control">
+          <button class="icon-button" data-tool="move" aria-label="Move" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 5V3a1.5 1.5 0 0 1 3 0v8M14 5a1.5 1.5 0 0 1 3 0v7M17 8a1.5 1.5 0 0 1 3 0v7c0 4-2 7-6 7h-1c-2 0-3.5-1-5-3l-4-6a1.5 1.5 0 0 1 2.5-1.7L8 14"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Move</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="sample" aria-label="Color sampler" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 21 1-5L15 5l4 4L8 20zM13 3l8 8M16 6l3-3a2 2 0 0 1 3 3l-3 3"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Color sampler</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" id="grid-toggle" aria-label="Grid size" aria-expanded="false" aria-controls="grid-settings" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Grid size</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" id="crop-start" aria-label="Crop" aria-expanded="false" aria-controls="crop-settings" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14M10 6h8v8"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Crop</span>
+        </span>
+      </div>
+      <div class="tool-group" role="group" aria-label="Selection and clipboard tools">
+        <span class="tool-control">
+          <button class="icon-button" data-tool="select" aria-label="Select" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path stroke-dasharray="3 3" d="M3 3h18v18H3z"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Select a section</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" id="copy" aria-label="Copy selection" aria-keyshortcuts="Control+c Meta+c" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="1"/><path d="M16 8V3H3v13h5"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Copy (Ctrl/Cmd+C)</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" id="paste" aria-label="Paste" aria-keyshortcuts="Control+v Meta+v" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H4v16h16V5h-4"/><rect x="8" y="2" width="8" height="5" rx="1"/><path d="M8 12h8M8 16h8"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Paste (Ctrl/Cmd+V)</span>
+        </span>
+      </div>
+      <div class="tool-group" role="group" aria-label="History tools">
+        <span class="tool-control">
+          <button class="icon-button" id="undo" aria-label="Undo" aria-keyshortcuts="Control+z Meta+z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 10l6 6M3 10h11a7 7 0 0 1 7 7v3"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Undo (Ctrl/Cmd+Z)</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" id="redo" aria-label="Redo" aria-keyshortcuts="Control+Shift+z Meta+Shift+z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 6 6-6 6M21 10H10a7 7 0 0 0-7 7v3"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Redo (Ctrl/Cmd+Shift+Z)</span>
+        </span>
+      </div>
       <label class="check"><input id="reference-toggle" type="checkbox" checked disabled> Reference</label>
       <label class="check"><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
     </section>
+    <section id="object-settings" class="object-settings" aria-label="Drawing and placement controls" hidden>
+      <div id="shape-options">
+        <label>Shape <select id="shape-type"><option value="rectangle">Rectangle</option><option value="ellipse">Circle / Oval</option><option value="triangle">Triangle</option><option value="star">Star</option></select></label>
+        <label>Style <select id="shape-fill"><option value="outline">Outline</option><option value="filled">Filled</option></select></label>
+      </div>
+      <div id="object-transform">
+        <label>Width <input id="object-width" type="number" min="1" max="500" step="1" value="1" disabled></label>
+        <label>Height <input id="object-height" type="number" min="1" max="500" step="1" value="1" disabled></label>
+        <label>Rotation <input id="object-angle" type="number" min="0" max="359" step="1" value="0" disabled> &deg;</label>
+      </div>
+      <div id="placement-actions">
+        <button id="placement-apply" class="primary" disabled>Apply placement</button>
+        <button id="placement-cancel" disabled>Cancel</button>
+      </div>
+      <p id="object-help">Drag on the grid to start. Adjust handles, then click away or Apply to finalize. Enter applies; Escape cancels.</p>
+    </section>
     <section id="grid-settings" class="grid-settings" hidden>
-      <label for="grid-size">Cells on longest side <output id="grid-value">50</output></label>
+      <label for="grid-number">Cells on longest side</label>
+      <input id="grid-number" type="text" inputmode="decimal" value="50" aria-describedby="grid-error grid-help" autocomplete="off">
+      <label class="visually-hidden" for="grid-size">Grid size slider</label>
       <input id="grid-size" type="range" min="4" max="500" value="50">
       <button id="apply-grid">Apply size</button>
-      <p>Image proportions stay fixed; row/column counts round to whole cells. Resizing resamples your painting. Undo restores it.</p>
+      <p id="grid-help">4-500 cells. Decimals round down. Press Enter or Apply size. Resizing resamples paint; Undo restores it.</p>
+      <p id="grid-error" role="alert"></p>
     </section>
-    <section class="palette-bar" aria-label="Color palette">
-      <strong>Thread palette</strong>
-      <div id="palette" role="group" aria-label="Select a paint color"></div>
-      <label class="color-label">New color <input id="new-color" type="color" value="#bb543d"></label>
-      <button id="add-color">Add color</button>
-      <span id="selected-color"></span>
+    <section id="crop-settings" class="crop-settings" aria-label="Crop controls" hidden>
+      <label>Ratio <select id="crop-ratio"><option value="free">Free form</option><option value="square">1:1</option><option value="photo">3:2</option><option value="standard">4:3</option><option value="wide">16:9</option></select></label>
+      <label id="crop-scale-label" hidden>Size <input id="crop-scale" type="range" min="1" max="100" value="100"><output id="crop-scale-value">100%</output></label>
+      <label>Width <input id="crop-width" type="number" min="1" step="1"></label>
+      <label>Height <input id="crop-height" type="number" min="1" step="1"></label>
+      <button id="crop-apply" class="primary">Apply crop</button>
+      <button id="crop-cancel">Cancel</button>
+      <p id="crop-help">Drag inside the frame to move it; drag a corner to resize. Arrow keys move the focused frame or resize a focused corner. Enter applies; Escape cancels. Crops reference and paint; Undo restores both.</p>
+      <p id="crop-error" role="alert"></p>
     </section>
     <div class="workspace-area">
     <section id="workspace" aria-label="Pattern workspace">
@@ -64,9 +142,46 @@
         <p class="fine">PNG, JPEG, WebP or GIF &middot; up to 20 MB<br>Reference resized to a maximum of 500 pixels. Nothing is uploaded.</p>
       </div>
       <div id="canvas-wrap" hidden>
-        <canvas id="canvas" tabindex="0" aria-label="Pattern editor. Use arrow keys to choose a cell and Space to paint or sample with the selected tool." aria-describedby="help"></canvas>
+        <div id="canvas-stage">
+          <canvas id="canvas" tabindex="0" aria-label="Pattern editor. Use arrow keys to choose a cell and Space to paint or sample. With Move selected, drag or use arrow keys to pan." aria-describedby="help"></canvas>
+          <div id="object-overlay" hidden>
+            <svg id="object-outline" preserveAspectRatio="none" aria-label="Editable placement">
+              <line id="line-hit" data-edit="move" tabindex="0" role="button" aria-label="Move line"/>
+              <polygon id="box-hit" data-edit="move" tabindex="0" role="button" aria-label="Move selection or placement"/>
+            </svg>
+            <button class="object-handle" data-edit="a" aria-label="Adjust line start"></button>
+            <button class="object-handle" data-edit="b" aria-label="Adjust line end"></button>
+            <button class="object-handle" data-edit="resize" data-resize="nw" aria-label="Resize top-left"></button>
+            <button class="object-handle" data-edit="resize" data-resize="ne" aria-label="Resize top-right"></button>
+            <button class="object-handle" data-edit="resize" data-resize="se" aria-label="Resize bottom-right"></button>
+            <button class="object-handle" data-edit="resize" data-resize="sw" aria-label="Resize bottom-left"></button>
+            <button class="object-handle rotation-handle" data-edit="rotate" aria-label="Rotate around center">&#8635;</button>
+            <span id="object-dimensions"></span>
+          </div>
+          <div id="crop-overlay" hidden>
+            <div id="crop-frame" tabindex="0" role="group" aria-label="Crop frame" aria-describedby="crop-help">
+              <button class="crop-handle nw" data-corner="nw" aria-label="Resize top-left crop corner"></button>
+              <button class="crop-handle ne" data-corner="ne" aria-label="Resize top-right crop corner"></button>
+              <button class="crop-handle sw" data-corner="sw" aria-label="Resize bottom-left crop corner"></button>
+              <button class="crop-handle se" data-corner="se" aria-label="Resize bottom-right crop corner"></button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
+    <div id="workspace-controls" class="workspace-controls" hidden>
+    <details id="palette-menu">
+      <summary id="palette-toggle">Palette <span id="palette-current" aria-hidden="true"></span><span id="palette-current-label" class="visually-hidden">No color selected</span></summary>
+      <section class="palette-panel" aria-label="Color palette">
+        <strong>Thread palette</strong>
+        <div id="palette" role="group" aria-label="Select a paint color"></div>
+        <span id="selected-color" role="status"></span>
+        <div class="palette-add">
+          <label class="color-label">New color <input id="new-color" type="color" value="#bb543d"></label>
+          <button id="add-color">Add color</button>
+        </div>
+      </section>
+    </details>
     <section class="zoom-bar" aria-label="Display zoom">
       <span>Zoom Controls</span>
       <button id="zoom-out" aria-label="Zoom out" aria-describedby="zoom-help" title="Zoom out" disabled>&minus;</button>
@@ -74,8 +189,8 @@
       <span id="zoom-help" class="visually-hidden">Scroll to explore when zoomed in. Display only; exports stay unchanged.</span>
     </section>
     </div>
+    </div>
     <footer><span id="dimensions">No pattern open</span><p id="help">Drag to paint &middot; Arrow keys + Space also paint &middot; Ctrl/Cmd+Z: undo &middot; Ctrl/Cmd+Shift+Z: redo</p><span id="save-state">Stored only in this browser</span></footer>
-    <p id="message" role="status" aria-live="polite"></p>
     <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
     <input id="project-file" type="file" accept=".json,application/json" hidden>
   </main>

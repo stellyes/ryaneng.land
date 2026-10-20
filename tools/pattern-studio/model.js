@@ -1,5 +1,20 @@
 export const MAX_SIDE = 500;
 
+export function parseGridSize(value) {
+    const text = String(value).trim();
+    if (/[a-z]/i.test(text) || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) {
+        throw new Error('Use a number without letters.');
+    }
+    // Floor decimal text directly so floating-point rounding cannot promote a long fraction.
+    const [whole, fraction = ''] = text.replace(/^[+-]/, '').split('.');
+    const magnitude = Number(whole || '0');
+    const size = text.startsWith('-') ? -magnitude - (/[1-9]/.test(fraction) ? 1 : 0) : magnitude;
+    if (!Number.isFinite(size) || size < 4 || size > MAX_SIDE) {
+        throw new Error('Grid size must round down to a value from 4 to 500.');
+    }
+    return size;
+}
+
 export function gridDimensions(width, height, longest) {
     const ratio = longest / Math.max(width, height);
     return { cols: Math.max(1, Math.round(width * ratio)), rows: Math.max(1, Math.round(height * ratio)) };
@@ -10,6 +25,16 @@ export function resizeCells(cells, cols, rows, nextCols, nextRows) {
         const x = Math.min(cols - 1, Math.floor((index % nextCols + 0.5) * cols / nextCols));
         const y = Math.min(rows - 1, Math.floor((Math.floor(index / nextCols) + 0.5) * rows / nextRows));
         return cells[y * cols + x];
+    });
+}
+
+export function cropCells(project, rect, cols, rows) {
+    return Array.from({ length: cols * rows }, (_, index) => {
+        const x = rect.x + (index % cols + 0.5) * rect.width / cols;
+        const y = rect.y + (Math.floor(index / cols) + 0.5) * rect.height / rows;
+        const sourceX = Math.min(project.cols - 1, Math.floor(x / project.width * project.cols));
+        const sourceY = Math.min(project.rows - 1, Math.floor(y / project.height * project.rows));
+        return project.cells[sourceY * project.cols + sourceX];
     });
 }
 

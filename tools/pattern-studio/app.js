@@ -1,4 +1,6 @@
-import { MAX_SIDE, gridDimensions, resizeCells, flood, line, validateProject, openStore } from './model.js';
+import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from './model.js';
+import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
+import { createPlacementEditor } from './placement.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -13,6 +15,7 @@ let tool = 'paint';
 let history = [];
 let future = [];
 let stroke = null;
+let pan = null;
 let cursor = { x: 0, y: 0 };
 let keyboardFocus = false;
 let timer;
@@ -22,6 +25,18 @@ let saveQueue = Promise.resolve();
 let store = null;
 let storageError = null;
 let zoom = 1;
+let crop = null;
+let cropDrag = null;
+const placement = createPlacementEditor({
+    canvas, getProject: () => project, getColor: () => selected,
+    redraw: render, updateControls, notify,
+    commitPixels(pixels) {
+        if (!project || !Array.from(pixels).some(([index, color]) => project.cells[index] !== color)) return;
+        remember(snapshot());
+        for (const [index, color] of pixels) project.cells[index] = color;
+        changed();
+    },
+});
 
 function notify(text, error = false) {
     $('message').textContent = text;
@@ -38,7 +53,11 @@ function report(error) {
 }
 
 function action(id, handler) {
-    $(id).addEventListener('click', () => Promise.resolve().then(finishStroke).then(handler).catch(report));
+    $(id).addEventListener('click', () => Promise.resolve().then(() => {
+        finishPan();
+        finishStroke();
+        if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'copy', 'paste'].includes(id)) placement.commit();
+    }).then(handler).catch(report));
 }
 
 const storeReady = openStore().then(value => { store = value; }).catch(error => {
@@ -48,13 +67,44 @@ const storeReady = openStore().then(value => { store = value; }).catch(error => 
 });
 
 function snapshot() {
-    return { cols: project.cols, rows: project.rows, cells: project.cells.slice() };
+    return {
+        cols: project.cols, rows: project.rows, cells: project.cells.slice(),
+        width: project.width, height: project.height, reference: project.reference, referenceImage: reference,
+    };
+}
+
+function prepareSampler() {
+    sampleCanvas.width = project.width;
+    sampleCanvas.height = project.height;
+    // Sample the full-opacity reference, with transparency displayed over white.
+    sampleContext.fillStyle = '#ffffff';
+    sampleContext.fillRect(0, 0, project.width, project.height);
+    sampleContext.drawImage(reference, 0, 0);
+}
+
+function restoreSnapshot(saved) {
+    const { referenceImage, ...data } = saved;
+    Object.assign(project, data);
+    reference = referenceImage;
+    prepareSampler();
+    cursor = { x: 0, y: 0 };
 }
 
 function remember(before) {
     history.push(before);
-    // Bound undo memory even for 500 x 500 grids.
-    while (history.length > 1 && history.reduce((sum, item) => sum + item.cells.length, 0) > 2000000) history.shift();
+    // Count each retained reference once, including images kept alive by crop undo.
+    const cost = () => {
+        const images = new Set();
+        return history.reduce((sum, item) => {
+            let size = item.cells.length;
+            if (!images.has(item.referenceImage)) {
+                images.add(item.referenceImage);
+                size += item.width * item.height + item.reference.length / 4;
+            }
+            return sum + size;
+        }, 0);
+    };
+    while (history.length > 1 && cost() > 2000000) history.shift();
     future = [];
 }
 
@@ -93,7 +143,9 @@ async function save() {
 }
 
 async function protectUnsaved() {
+    finishPan();
     finishStroke();
+    placement.commit();
     try {
         do {
             await save();
@@ -108,21 +160,32 @@ async function protectUnsaved() {
 
 function updateControls() {
     const active = Boolean(project);
-    for (const id of ['name', 'backup', 'export', 'grid-toggle', 'reference-toggle', 'lines-toggle']) $(id).disabled = !active;
-    document.querySelectorAll('[data-tool]').forEach(button => { button.disabled = !active; });
-    $('undo').disabled = !active || !history.length;
-    $('redo').disabled = !active || !future.length;
+    $('workspace-controls').hidden = !active;
+    for (const id of ['name', 'backup', 'export', 'grid-toggle', 'crop-start', 'reference-toggle', 'lines-toggle']) $(id).disabled = !active || Boolean(crop);
+    $('projects').disabled = Boolean(crop);
+    document.querySelectorAll('[data-tool]').forEach(button => { button.disabled = !active || Boolean(crop); });
+    $('undo').disabled = !active || Boolean(crop) || (!history.length && !placement.active);
+    $('redo').disabled = !active || Boolean(crop) || placement.active || !future.length;
+    $('copy').disabled = !active || Boolean(crop) || !placement.selecting;
+    $('paste').disabled = !active || Boolean(crop) || !placement.canPaste;
+    $('object-settings').hidden = !active || Boolean(crop) || (!placement.active && !['line', 'shape', 'select'].includes(tool));
+    $('shape-options').hidden = tool !== 'shape' || (placement.active && placement.kind !== 'shape');
+    $('object-transform').hidden = placement.active ? !['shape', 'paste'].includes(placement.kind) : tool !== 'shape';
+    $('placement-apply').disabled = !placement.active || placement.selecting;
+    $('placement-cancel').disabled = !placement.active;
+    for (const key of ['width', 'height', 'angle']) $(`object-${key}`).disabled = !placement.active;
     $('save-now').disabled = !active;
     $('zoom-out').disabled = !active || zoom <= 1;
     $('zoom-in').disabled = !active || zoom >= 8;
     if (active) {
         $('dimensions').textContent = `${project.cols} x ${project.rows} cells | Reference ${project.width} x ${project.height}px`;
         $('grid-size').value = Math.max(project.cols, project.rows);
-        $('grid-value').value = $('grid-size').value;
+        $('grid-number').value = $('grid-size').value;
     }
 }
 
 function renderPalette() {
+    const focusedColor = $('palette').contains(document.activeElement) ? document.activeElement.title : null;
     $('palette').replaceChildren();
     const colors = project ? project.palette : [];
     for (const color of colors) {
@@ -136,13 +199,29 @@ function renderPalette() {
             finishStroke();
             selected = color;
             renderPalette();
+            placement.refresh();
         });
         $('palette').append(button);
     }
     $('selected-color').textContent = selected ? `Selected: ${selected}` : 'Add a color or sample your reference to start.';
-    $('add-color').disabled = !project;
-    $('new-color').disabled = !project;
+    $('palette-current').style.background = selected || '';
+    $('palette-current-label').textContent = selected ? `Selected color ${selected}` : 'No color selected';
+    $('palette-toggle').title = selected ? `Palette - ${selected}` : 'Palette - no color selected';
+    if (focusedColor) {
+        Array.from($('palette').children).find(button => button.title === focusedColor)?.focus({ preventScroll: true });
+    }
+    $('add-color').disabled = !project || Boolean(crop);
+    $('new-color').disabled = !project || Boolean(crop);
 }
+
+$('palette-menu').addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('palette-menu').open) {
+        event.preventDefault();
+        event.stopPropagation();
+        $('palette-menu').open = false;
+        $('palette-toggle').focus({ preventScroll: true });
+    }
+});
 
 function render() {
     $('sample-preview').hidden = true;
@@ -164,18 +243,22 @@ function render() {
     context.setTransform(canvas.width / project.width, 0, 0, canvas.height / project.height, 0, 0);
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, project.width, project.height);
-    if (tool === 'sample' || $('reference-toggle').checked) {
-        context.globalAlpha = tool === 'sample' ? 1 : 0.6;
+    if (crop || tool === 'sample' || $('reference-toggle').checked) {
+        context.globalAlpha = crop || tool === 'sample' ? 1 : 0.6;
         context.drawImage(reference, 0, 0, project.width, project.height);
         context.globalAlpha = 1;
     }
     const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
-    if (tool !== 'sample') project.cells.forEach((color, index) => {
+    if (crop || tool !== 'sample') project.cells.forEach((color, index) => {
         if (color === null) return;
         context.fillStyle = color;
         context.fillRect(index % project.cols * cellWidth, Math.floor(index / project.cols) * cellHeight, cellWidth, cellHeight);
     });
-    if (tool !== 'sample' && $('lines-toggle').checked) {
+    if (!crop && tool !== 'sample') for (const [index, color] of placement.preview()) {
+        context.fillStyle = color;
+        context.fillRect(index % project.cols * cellWidth, Math.floor(index / project.cols) * cellHeight, cellWidth, cellHeight);
+    }
+    if (!crop && tool !== 'sample' && $('lines-toggle').checked) {
         context.strokeStyle = 'rgba(30, 45, 35, 0.3)';
         context.lineWidth = project.width / canvas.width;
         context.beginPath();
@@ -189,7 +272,7 @@ function render() {
         }
         context.stroke();
     }
-    if (keyboardFocus) {
+    if (!crop && !placement.active && tool !== 'move' && keyboardFocus) {
         context.strokeStyle = '#ffffff';
         context.lineWidth = 3 * project.width / canvas.width;
         context.strokeRect(cursor.x * cellWidth, cursor.y * cellHeight, cellWidth, cellHeight);
@@ -197,6 +280,8 @@ function render() {
         context.lineWidth = project.width / canvas.width;
         context.strokeRect(cursor.x * cellWidth, cursor.y * cellHeight, cellWidth, cellHeight);
     }
+    renderCrop();
+    placement.render();
 }
 
 async function decodeImage(src) {
@@ -214,15 +299,11 @@ async function activate(data) {
     if (!(await protectUnsaved())) return false;
     project = data;
     reference = image;
-    sampleCanvas.width = data.width;
-    sampleCanvas.height = data.height;
-    // Sample the full-opacity reference, with transparency displayed over white.
-    sampleContext.fillStyle = '#ffffff';
-    sampleContext.fillRect(0, 0, data.width, data.height);
-    sampleContext.drawImage(image, 0, 0);
+    prepareSampler();
     selected = data.palette[0] || null;
     tool = 'paint';
     canvas.classList.remove('sampling');
+    $('workspace').classList.remove('moving');
     document.querySelectorAll('[data-tool]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tool === tool)));
     history = [];
     future = [];
@@ -238,6 +319,7 @@ async function activate(data) {
     $('save-state').textContent = 'Saved on this device';
     $('project-dialog').close();
     updateControls();
+    clearGridError();
     renderPalette();
     render();
     return true;
@@ -272,6 +354,7 @@ function addPaletteColor(color) {
     selected = existing || color;
     $('new-color').value = selected;
     renderPalette();
+    placement.refresh();
 }
 
 function sampleColor(x, y) {
@@ -295,7 +378,7 @@ function previewSample(event) {
 }
 
 function needsPaintColor() {
-    if ((tool === 'paint' || tool === 'fill') && !selected) {
+    if (['paint', 'fill', 'line', 'shape'].includes(tool) && !selected) {
         notify('Add a palette color or use Color sampler before painting.', true);
         return true;
     }
@@ -311,8 +394,8 @@ function cellAt(event) {
 }
 
 function applyCell(x, y) {
-    const color = tool === 'erase' || tool === 'erase-fill' ? null : selected;
-    if (tool === 'fill' || tool === 'erase-fill') {
+    const color = tool === 'erase' ? null : selected;
+    if (tool === 'fill') {
         return flood(project.cells, project.cols, project.rows, x, y, color);
     }
     const index = y * project.cols + x;
@@ -333,10 +416,14 @@ function finishStroke() {
 }
 
 canvas.addEventListener('pointerdown', event => {
-    if (!project || !largeScreen.matches || event.button !== 0 || stroke || !event.isPrimary) return;
+    if (!project || crop || tool === 'move' || !largeScreen.matches || event.button !== 0 || stroke || !event.isPrimary) return;
     event.preventDefault();
     canvas.focus({ preventScroll: true });
     keyboardFocus = false;
+    if (placement.active) {
+        placement.begin(event, tool);
+        return;
+    }
     if (tool === 'sample') {
         try {
             render();
@@ -347,6 +434,7 @@ canvas.addEventListener('pointerdown', event => {
         return;
     }
     if (needsPaintColor()) return;
+    if (placement.begin(event, tool)) return;
     const position = cellAt(event);
     cursor = position;
     stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false };
@@ -355,11 +443,11 @@ canvas.addEventListener('pointerdown', event => {
     render();
 });
 canvas.addEventListener('pointermove', event => {
-    if (project && largeScreen.matches && tool === 'sample') {
+    if (project && !crop && largeScreen.matches && tool === 'sample') {
         previewSample(event);
         return;
     }
-    if (!stroke || stroke.id !== event.pointerId || tool === 'fill' || tool === 'erase-fill') return;
+    if (!stroke || stroke.id !== event.pointerId || tool === 'fill') return;
     const position = cellAt(event);
     line(stroke.last.x, stroke.last.y, position.x, position.y, (x, y) => {
         if (applyCell(x, y)) stroke.changed = true;
@@ -376,9 +464,54 @@ canvas.addEventListener('pointerup', event => {
 canvas.addEventListener('pointercancel', () => { $('sample-preview').hidden = true; });
 canvas.addEventListener('focus', () => { keyboardFocus = true; render(); });
 canvas.addEventListener('blur', () => { keyboardFocus = false; render(); });
+
+function finishPan() {
+    if (!pan) return;
+    const id = pan.id;
+    pan = null;
+    const workspace = $('workspace');
+    workspace.classList.remove('panning');
+    if (workspace.hasPointerCapture(id)) workspace.releasePointerCapture(id);
+}
+
+$('workspace').addEventListener('pointerdown', event => {
+    if (!project || crop || tool !== 'move' || !largeScreen.matches || pan || event.button !== 0 || !event.isPrimary) return;
+    const workspace = $('workspace');
+    const rect = workspace.getBoundingClientRect();
+    if (event.clientX >= rect.left + workspace.clientWidth || event.clientY >= rect.top + workspace.clientHeight) return;
+    event.preventDefault();
+    canvas.focus({ preventScroll: true });
+    keyboardFocus = false;
+    pan = { id: event.pointerId, x: event.clientX, y: event.clientY, left: workspace.scrollLeft, top: workspace.scrollTop };
+    workspace.setPointerCapture(event.pointerId);
+    workspace.classList.add('panning');
+    render();
+});
+$('workspace').addEventListener('pointermove', event => {
+    if (!pan || event.pointerId !== pan.id) return;
+    event.preventDefault();
+    $('workspace').scrollTo(pan.left + pan.x - event.clientX, pan.top + pan.y - event.clientY);
+});
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) $('workspace').addEventListener(name, event => {
+    if (pan && event.pointerId === pan.id) finishPan();
+});
+window.addEventListener('blur', finishPan);
+
 canvas.addEventListener('keydown', event => {
-    if (!project || !largeScreen.matches) return;
+    if (!project || crop || !largeScreen.matches) return;
+    if (placement.keydown(event)) return;
     const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (tool === 'move') {
+        if (moves[event.key]) {
+            event.preventDefault();
+            finishPan();
+            const step = event.shiftKey ? 120 : 40;
+            $('workspace').scrollBy(moves[event.key][0] * step, moves[event.key][1] * step);
+        } else if (event.key === ' ' || event.key === 'Enter') {
+            event.preventDefault();
+        }
+        return;
+    }
     if (moves[event.key]) {
         event.preventDefault();
         finishStroke();
@@ -399,42 +532,81 @@ canvas.addEventListener('keydown', event => {
             return;
         }
         if (needsPaintColor()) return;
+        if (['line', 'shape', 'select'].includes(tool)) {
+            placement.startKeyboard(tool, cursor);
+            return;
+        }
         const before = snapshot();
         if (applyCell(cursor.x, cursor.y)) { remember(before); changed(); render(); }
     }
 });
 
 document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
+    finishPan();
     finishStroke();
+    placement.commit();
     tool = button.dataset.tool;
     canvas.classList.toggle('sampling', tool === 'sample');
+    $('workspace').classList.toggle('moving', tool === 'move');
+    $('sample-preview').hidden = true;
     document.querySelectorAll('[data-tool]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    updateControls();
     render();
     if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
+    if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. Choose Paint to resume drawing.');
+    if (['line', 'shape', 'select'].includes(tool)) notify(tool === 'select'
+        ? 'Drag a selection on the grid, then Copy and Paste to duplicate it.'
+        : 'Drag to draw. Adjust handles and palette color, then click away or Apply to finalize.');
 }));
 
 function undo() {
+    if (crop) return;
+    if (placement.active) { placement.cancel(); return; }
     finishStroke();
     if (!history.length) return;
     future.push(snapshot());
-    Object.assign(project, history.pop());
-    cursor = { x: 0, y: 0 };
+    restoreSnapshot(history.pop());
     changed(); render();
 }
 
 function redo() {
+    if (crop) return;
+    if (placement.active) return;
     finishStroke();
     if (!future.length) return;
     history.push(snapshot());
-    Object.assign(project, future.pop());
-    cursor = { x: 0, y: 0 };
+    restoreSnapshot(future.pop());
     changed(); render();
 }
 
 action('undo', undo);
 action('redo', redo);
+action('copy', () => placement.copy());
+action('paste', () => placement.paste());
+document.addEventListener('pointerdown', event => {
+    if (!placement.active || event.button !== 0 || !event.isPrimary ||
+        event.target.closest('#canvas-stage, #object-settings, #palette-menu, .zoom-bar, [data-tool], #copy, #paste, #undo, #redo')) return;
+    placement.commit();
+}, true);
+document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || event.altKey || !project || crop || !largeScreen.matches ||
+        document.querySelector('dialog[open]')) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) {
+        if (event.key === 'Escape' && target.closest('#object-settings')) placement.keydown(event);
+        return;
+    }
+    const key = event.key.toLowerCase();
+    if ((event.ctrlKey || event.metaKey) && ['c', 'v'].includes(key)) {
+        event.preventDefault();
+        finishStroke();
+        if (key === 'c') placement.copy();
+        else placement.paste();
+    } else if (!(event.ctrlKey || event.metaKey)) placement.keydown(event);
+});
 function setZoom(value) {
     if (!project) return;
+    finishPan();
     finishStroke();
     const workspace = $('workspace');
     const previous = canvas.getBoundingClientRect();
@@ -453,7 +625,7 @@ action('zoom-out', () => setZoom(zoom - 0.25));
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey ||
         !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' ||
-        !project || !largeScreen.matches || document.querySelector('dialog[open]')) return;
+        !project || crop || !largeScreen.matches || document.querySelector('dialog[open]')) return;
     const target = event.target;
     if (target instanceof HTMLElement &&
         (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
@@ -467,10 +639,46 @@ action('grid-toggle', () => {
     $('grid-settings').hidden = !$('grid-settings').hidden;
     $('grid-toggle').setAttribute('aria-expanded', String(!$('grid-settings').hidden));
 });
-$('grid-size').addEventListener('input', () => { $('grid-value').value = $('grid-size').value; });
-action('apply-grid', () => {
-    const { cols, rows } = gridDimensions(project.width, project.height, Number($('grid-size').value));
+function clearGridError() {
+    $('grid-error').textContent = '';
+    $('grid-number').removeAttribute('aria-invalid');
+}
+
+function showGridError(error, restore = false) {
+    $('grid-error').textContent = error.message + (restore ? ' The previous grid size has been restored.' : '');
+    $('grid-number').setAttribute('aria-invalid', 'true');
+    if (restore) {
+        $('grid-number').value = Math.max(project.cols, project.rows);
+        $('grid-size').value = $('grid-number').value;
+    }
+}
+
+$('grid-size').addEventListener('input', () => {
+    $('grid-number').value = $('grid-size').value;
+    clearGridError();
+});
+$('grid-number').addEventListener('input', () => {
+    try {
+        const size = parseGridSize($('grid-number').value);
+        $('grid-size').value = size;
+        clearGridError();
+    } catch (error) { showGridError(error); }
+});
+$('grid-number').addEventListener('change', () => {
+    try { $('grid-number').value = parseGridSize($('grid-number').value); }
+    catch (error) { showGridError(error); }
+});
+function applyGrid() {
+    if (!project || crop) return;
+    let size;
+    try { size = parseGridSize($('grid-number').value); }
+    catch (error) { showGridError(error, true); return; }
+    clearGridError();
+    $('grid-number').value = size;
+    $('grid-size').value = size;
+    const { cols, rows } = gridDimensions(project.width, project.height, size);
     if (cols === project.cols && rows === project.rows) return;
+    placement.commit();
     remember(snapshot());
     project.cells = resizeCells(project.cells, project.cols, project.rows, cols, rows);
     project.cols = cols;
@@ -478,6 +686,203 @@ action('apply-grid', () => {
     cursor = { x: 0, y: 0 };
     changed(); render();
     notify('Grid resized. Existing paint was resampled; Undo restores the previous grid.');
+}
+action('apply-grid', applyGrid);
+$('grid-number').addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        finishStroke();
+        applyGrid();
+    }
+});
+
+function renderCrop() {
+    $('crop-overlay').hidden = !crop;
+    if (!crop) return;
+    const { rect, ratioKey } = crop;
+    const frame = $('crop-frame');
+    frame.style.left = `${rect.x / project.width * 100}%`;
+    frame.style.top = `${rect.y / project.height * 100}%`;
+    frame.style.width = `${rect.width / project.width * 100}%`;
+    frame.style.height = `${rect.height / project.height * 100}%`;
+    frame.setAttribute('aria-label', `Crop frame: ${rect.width} by ${rect.height} pixels, at ${rect.x}, ${rect.y}`);
+    $('crop-width').value = rect.width;
+    $('crop-height').value = rect.height;
+    $('crop-width').disabled = ratioKey !== 'free';
+    $('crop-height').disabled = ratioKey !== 'free';
+    $('crop-width').max = project.width - rect.x;
+    $('crop-height').max = project.height - rect.y;
+    $('crop-scale-label').hidden = ratioKey === 'free';
+    if (ratioKey !== 'free') {
+        const full = fitCrop(project.width, project.height, CROP_RATIOS[ratioKey]);
+        const percent = Math.max(1, Math.round(rect.width / full.width * 100));
+        $('crop-scale').value = percent;
+        $('crop-scale-value').value = `${percent}%`;
+    }
+}
+
+function endCropDrag() {
+    if (!cropDrag) return;
+    const id = cropDrag.id;
+    cropDrag = null;
+    if ($('crop-overlay').hasPointerCapture(id)) $('crop-overlay').releasePointerCapture(id);
+}
+
+function exitCrop(applied = false) {
+    if (!crop) return;
+    endCropDrag();
+    const previous = crop.previousView;
+    crop = null;
+    $('crop-settings').hidden = true;
+    $('crop-start').setAttribute('aria-expanded', 'false');
+    zoom = applied ? 1 : previous.zoom;
+    updateControls();
+    renderPalette();
+    render();
+    $('workspace').scrollTo(applied ? 0 : previous.x, applied ? 0 : previous.y);
+    canvas.focus({ preventScroll: true });
+}
+
+action('crop-start', () => {
+    if (!project || crop) return;
+    const workspace = $('workspace');
+    crop = {
+        rect: fitCrop(project.width, project.height, null), ratioKey: 'free',
+        previousView: { zoom, x: workspace.scrollLeft, y: workspace.scrollTop },
+    };
+    zoom = 1;
+    $('crop-ratio').value = 'free';
+    $('crop-error').textContent = '';
+    $('grid-settings').hidden = true;
+    $('grid-toggle').setAttribute('aria-expanded', 'false');
+    $('crop-settings').hidden = false;
+    $('crop-start').setAttribute('aria-expanded', 'true');
+    updateControls();
+    renderPalette();
+    render();
+    workspace.scrollTo(0, 0);
+    $('crop-frame').focus({ preventScroll: true });
+    notify('Adjust the crop frame, then Apply crop. Shaded areas will be removed. Cancel keeps the original.');
+});
+action('crop-cancel', () => { exitCrop(); notify('Crop cancelled. Your pattern is unchanged.'); });
+
+$('crop-ratio').addEventListener('change', () => {
+    if (!crop) return;
+    try {
+        const key = $('crop-ratio').value;
+        const rect = key === 'free' ? crop.rect : fitCrop(project.width, project.height, CROP_RATIOS[key]);
+        crop.rect = rect;
+        crop.ratioKey = key;
+        $('crop-error').textContent = '';
+    } catch (error) {
+        $('crop-error').textContent = error.message;
+        $('crop-ratio').value = crop.ratioKey;
+    }
+    renderCrop();
+});
+$('crop-scale').addEventListener('input', () => {
+    if (!crop || crop.ratioKey === 'free') return;
+    const old = crop.rect;
+    const next = fitCrop(project.width, project.height, CROP_RATIOS[crop.ratioKey], Number($('crop-scale').value) / 100);
+    crop.rect = moveCrop(next, old.x + old.width / 2 - next.x - next.width / 2,
+        old.y + old.height / 2 - next.y - next.height / 2, project.width, project.height);
+    renderCrop();
+});
+for (const dimension of ['width', 'height']) {
+    $(`crop-${dimension}`).addEventListener('change', event => {
+        if (!crop || crop.ratioKey !== 'free') return;
+        const value = Math.floor(Number(event.target.value));
+        const limit = dimension === 'width' ? project.width - crop.rect.x : project.height - crop.rect.y;
+        if (!Number.isFinite(value) || value < 1 || value > limit) {
+            $('crop-error').textContent = `Crop ${dimension} must be from 1 to ${limit} pixels.`;
+        } else {
+            crop.rect[dimension] = value;
+            $('crop-error').textContent = '';
+        }
+        renderCrop();
+    });
+}
+
+$('crop-overlay').addEventListener('pointerdown', event => {
+    if (!crop || cropDrag || event.button !== 0 || !event.isPrimary || !event.target.closest('#crop-frame')) return;
+    event.preventDefault();
+    const corner = event.target.closest('[data-corner]');
+    (corner || $('crop-frame')).focus({ preventScroll: true });
+    cropDrag = {
+        id: event.pointerId, x: event.clientX, y: event.clientY, rect: { ...crop.rect },
+        bounds: canvas.getBoundingClientRect(), corner: corner?.dataset.corner,
+    };
+    $('crop-overlay').setPointerCapture(event.pointerId);
+});
+$('crop-overlay').addEventListener('pointermove', event => {
+    if (!crop || !cropDrag || event.pointerId !== cropDrag.id) return;
+    const dx = (event.clientX - cropDrag.x) * project.width / cropDrag.bounds.width;
+    const dy = (event.clientY - cropDrag.y) * project.height / cropDrag.bounds.height;
+    crop.rect = cropDrag.corner
+        ? resizeCrop(cropDrag.rect, cropDrag.corner, dx, dy, project.width, project.height, CROP_RATIOS[crop.ratioKey])
+        : moveCrop(cropDrag.rect, dx, dy, project.width, project.height);
+    renderCrop();
+});
+for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) $('crop-overlay').addEventListener(name, endCropDrag);
+$('crop-frame').addEventListener('keydown', event => {
+    if (!crop) return;
+    const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+    if (!moves[event.key]) return;
+    event.preventDefault();
+    const amount = event.shiftKey ? 10 : 1;
+    let [dx, dy] = moves[event.key].map(value => value * amount);
+    const corner = event.target.dataset.corner;
+    const ratio = CROP_RATIOS[crop.ratioKey];
+    if (corner && ratio) {
+        dx *= ratio[0];
+        dy *= ratio[1];
+    }
+    crop.rect = corner
+        ? resizeCrop(crop.rect, corner, dx, dy, project.width, project.height, ratio)
+        : moveCrop(crop.rect, dx, dy, project.width, project.height);
+    renderCrop();
+});
+
+function applyCrop() {
+    if (!crop) return;
+    endCropDrag();
+    const rect = crop.rect;
+    if (rect.x === 0 && rect.y === 0 && rect.width === project.width && rect.height === project.height) {
+        exitCrop();
+        notify('The crop already includes the entire image. No changes made.');
+        return;
+    }
+    const output = document.createElement('canvas');
+    output.width = rect.width;
+    output.height = rect.height;
+    output.getContext('2d').drawImage(reference, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    const referenceData = output.toDataURL('image/png');
+    const longest = Math.max(4, Math.min(MAX_SIDE, Math.round(Math.max(
+        rect.width / project.width * project.cols, rect.height / project.height * project.rows))));
+    const { cols, rows } = gridDimensions(rect.width, rect.height, longest);
+    const cells = cropCells(project, rect, cols, rows);
+    remember(snapshot());
+    Object.assign(project, { width: rect.width, height: rect.height, cols, rows, cells, reference: referenceData });
+    reference = output;
+    prepareSampler();
+    cursor = { x: 0, y: 0 };
+    changed();
+    exitCrop(true);
+    notify('Reference and pattern cropped. Painted cells were resampled to the new proportions. Undo restores the original.');
+}
+action('crop-apply', applyCrop);
+document.addEventListener('keydown', event => {
+    if (!crop || event.isComposing) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        exitCrop();
+        notify('Crop cancelled. Your pattern is unchanged.');
+    } else if (event.key === 'Enter' && (event.target.closest('#crop-frame') || event.target.closest('#crop-settings input'))) {
+        event.preventDefault();
+        // Commit an edited dimension before applying the crop.
+        if (event.target.matches('input[type="number"]')) event.target.dispatchEvent(new Event('change'));
+        if (!$('crop-error').textContent) applyCrop();
+    }
 });
 for (const id of ['reference-toggle', 'lines-toggle']) $(id).addEventListener('change', render);
 $('name').addEventListener('input', () => {
@@ -640,7 +1045,10 @@ document.querySelectorAll('[data-close]').forEach(button => button.addEventListe
 new ResizeObserver(render).observe($('workspace'));
 largeScreen.addEventListener('change', () => {
     finishStroke();
-    if (!largeScreen.matches) document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    if (!largeScreen.matches) {
+        exitCrop();
+        document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    }
     else render();
 });
 document.addEventListener('visibilitychange', () => {
@@ -648,7 +1056,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('beforeunload', event => {
     finishStroke();
-    if (dirty) { event.preventDefault(); event.returnValue = ''; }
+    if (dirty || placement.active) { event.preventDefault(); event.returnValue = ''; }
 });
 renderPalette();
 updateControls();
