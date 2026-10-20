@@ -57,7 +57,8 @@ try {
     rejects(() => validateProject({ ...record, cells: [] }), 'Wrong cell count rejected');
     rejects(() => validateProject({ ...record, cells: ['red', null, null, null] }), 'Invalid paint colors rejected');
     rejects(() => validateProject({ ...record, reference: 'https://example.com/image.png' }), 'Remote reference URLs rejected');
-    rejects(() => validateProject({ ...record, palette: [] }), 'Empty palettes rejected');
+    assert(validateProject({ ...record, palette: [] }).palette.length === 0, 'Empty palettes accepted for new projects');
+    rejects(() => validateProject({ ...record, palette: ['red'] }), 'Invalid palette colors rejected');
     rejects(() => validateProject({ ...record, width: 2, height: 1 }), 'Mismatched grid proportions rejected');
     rejects(() => validateProject({ ...record, version: 2 }), 'Unknown project version rejected');
     store = await openStore(database);
@@ -67,6 +68,9 @@ try {
     await store.run('readwrite', table => table.put({ ...record, name: 'Updated' }));
     const listed = await store.run('readonly', table => table.getAll());
     assert(listed.length === 1 && listed[0].name === 'Updated', 'Saving updates rather than duplicates a project');
+    await store.run('readwrite', table => table.put({ ...record, palette: [], cells: Array(4).fill(null) }));
+    const empty = await store.run('readonly', table => table.get(record.id));
+    assert(validateProject(empty).palette.length === 0, 'Empty-palette projects survive save and reopen validation');
     await store.run('readwrite', table => table.delete(record.id));
     assert((await store.run('readonly', table => table.getAll())).length === 0, 'Deleting removes a saved project');
     document.body.dataset.result = 'passed';

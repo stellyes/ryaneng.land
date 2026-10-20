@@ -33,7 +33,17 @@ controls stay on one row.
   Scroll horizontally/vertically to reach enlarged cells; zoom out to the minimum
   to fit the view. Zoom preserves the view center and does not alter the grid, saved
   painting, undo history, or export dimensions. Opening a project resets zoom.
-- Create a palette of up to 32 colors. The grid-size toggle exposes a 4-500 cell
+- New projects start with an empty palette (existing projects keep their colors).
+  Add up to 32 colors manually or choose Color sampler. Sampling temporarily
+  hides gridlines and painted cells and shows the full-opacity reference, even
+  if Reference is unchecked. An eyedropper cursor and live hex/swatch preview
+  follow the pointer; clicking/tapping adds and selects the reference color
+  without painting. Repeated colors reuse the existing swatch.
+  Transparent reference pixels are sampled over white, as displayed.
+  Choose Paint or another tool to restore the normal display; reference/grid
+  checkbox preferences are preserved. Arrow keys and Space/Enter also sample
+  at the selected cell's center. Painting requires a selected palette color.
+- The grid-size toggle exposes a 4-500 cell
   longest-side slider. Applying it nearest-neighbor resamples existing paint;
   row/column counts round to whole cells while the canvas retains reference proportions.
 - Projects autosave to IndexedDB after edits and can be reopened in Projects.

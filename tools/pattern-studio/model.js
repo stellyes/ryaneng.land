@@ -1,4 +1,3 @@
-export const DEFAULT_PALETTE = ['#28372f', '#f4ecd6', '#bb543d', '#d6ab57', '#789078', '#759ca6'];
 export const MAX_SIDE = 500;
 
 export function gridDimensions(width, height, longest) {
@@ -57,7 +56,7 @@ export function validateProject(data) {
         data.width < 1 || data.height < 1 || Math.max(data.width, data.height) > MAX_SIDE ||
         !Number.isInteger(data.cols) || !Number.isInteger(data.rows) ||
         data.cols < 1 || data.rows < 1 || Math.max(data.cols, data.rows) > MAX_SIDE ||
-        !Array.isArray(data.palette) || !data.palette.length || data.palette.length > 32 ||
+        !Array.isArray(data.palette) || data.palette.length > 32 ||
         !data.palette.every(c => typeof c === 'string' && hex.test(c)) ||
         !Array.isArray(data.cells) || data.cells.length !== data.cols * data.rows ||
         !data.cells.every(c => c === null || (typeof c === 'string' && hex.test(c))) ||

@@ -1,4 +1,4 @@
-import { DEFAULT_PALETTE, MAX_SIDE, gridDimensions, resizeCells, flood, line, validateProject, openStore } from './model.js';
+import { MAX_SIDE, gridDimensions, resizeCells, flood, line, validateProject, openStore } from './model.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -6,7 +6,9 @@ const context = canvas.getContext('2d');
 const largeScreen = matchMedia('(min-width: 768px)');
 let project = null;
 let reference = null;
-let selected = DEFAULT_PALETTE[0];
+const sampleCanvas = document.createElement('canvas');
+const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });
+let selected = null;
 let tool = 'paint';
 let history = [];
 let future = [];
@@ -122,7 +124,7 @@ function updateControls() {
 
 function renderPalette() {
     $('palette').replaceChildren();
-    const colors = project ? project.palette : DEFAULT_PALETTE;
+    const colors = project ? project.palette : [];
     for (const color of colors) {
         const button = document.createElement('button');
         button.className = 'swatch';
@@ -137,12 +139,13 @@ function renderPalette() {
         });
         $('palette').append(button);
     }
-    $('selected-color').textContent = `Selected: ${selected}`;
+    $('selected-color').textContent = selected ? `Selected: ${selected}` : 'Add a color or sample your reference to start.';
     $('add-color').disabled = !project;
     $('new-color').disabled = !project;
 }
 
 function render() {
+    $('sample-preview').hidden = true;
     if (!project || !largeScreen.matches) return;
     const wrap = $('canvas-wrap');
     const workspace = $('workspace');
@@ -161,18 +164,18 @@ function render() {
     context.setTransform(canvas.width / project.width, 0, 0, canvas.height / project.height, 0, 0);
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, project.width, project.height);
-    if ($('reference-toggle').checked) {
-        context.globalAlpha = 0.6;
+    if (tool === 'sample' || $('reference-toggle').checked) {
+        context.globalAlpha = tool === 'sample' ? 1 : 0.6;
         context.drawImage(reference, 0, 0, project.width, project.height);
         context.globalAlpha = 1;
     }
     const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
-    project.cells.forEach((color, index) => {
+    if (tool !== 'sample') project.cells.forEach((color, index) => {
         if (color === null) return;
         context.fillStyle = color;
         context.fillRect(index % project.cols * cellWidth, Math.floor(index / project.cols) * cellHeight, cellWidth, cellHeight);
     });
-    if ($('lines-toggle').checked) {
+    if (tool !== 'sample' && $('lines-toggle').checked) {
         context.strokeStyle = 'rgba(30, 45, 35, 0.3)';
         context.lineWidth = project.width / canvas.width;
         context.beginPath();
@@ -211,7 +214,16 @@ async function activate(data) {
     if (!(await protectUnsaved())) return false;
     project = data;
     reference = image;
-    selected = data.palette[0];
+    sampleCanvas.width = data.width;
+    sampleCanvas.height = data.height;
+    // Sample the full-opacity reference, with transparency displayed over white.
+    sampleContext.fillStyle = '#ffffff';
+    sampleContext.fillRect(0, 0, data.width, data.height);
+    sampleContext.drawImage(image, 0, 0);
+    selected = data.palette[0] || null;
+    tool = 'paint';
+    canvas.classList.remove('sampling');
+    document.querySelectorAll('[data-tool]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tool === tool)));
     history = [];
     future = [];
     cursor = { x: 0, y: 0 };
@@ -243,11 +255,51 @@ async function newFromImage(image, name) {
     const activated = await activate({
         version: 1, id: crypto.randomUUID(), name: name.slice(0, 80) || 'Untitled pattern',
         width, height, cols, rows, reference: thumbnail.toDataURL('image/png'),
-        palette: DEFAULT_PALETTE.slice(), cells: Array(cols * rows).fill(null), updatedAt: Date.now(),
+        palette: [], cells: Array(cols * rows).fill(null), updatedAt: Date.now(),
     });
     if (!activated) return;
     changed();
-    notify('Your reference is ready. Pick a color and paint over it. The reference is never included in exports.');
+    notify('Your reference is ready. Add a color or use Color sampler, then choose Paint. The reference is never included in exports.');
+}
+
+function addPaletteColor(color) {
+    const existing = project.palette.find(item => item.toLowerCase() === color);
+    if (!existing) {
+        if (project.palette.length >= 32) throw new Error('The demo supports up to 32 palette colors per project.');
+        project.palette.push(color);
+        changed();
+    }
+    selected = existing || color;
+    $('new-color').value = selected;
+    renderPalette();
+}
+
+function sampleColor(x, y) {
+    const pixel = sampleContext.getImageData(
+        Math.max(0, Math.min(project.width - 1, Math.floor(x))),
+        Math.max(0, Math.min(project.height - 1, Math.floor(y))), 1, 1).data;
+    return '#' + Array.from(pixel.slice(0, 3), value => value.toString(16).padStart(2, '0')).join('');
+}
+
+function previewSample(event) {
+    const rect = canvas.getBoundingClientRect();
+    const color = sampleColor((event.clientX - rect.left) / rect.width * project.width,
+        (event.clientY - rect.top) / rect.height * project.height);
+    $('sample-swatch').style.backgroundColor = color;
+    $('sample-hex').textContent = color;
+    const preview = $('sample-preview');
+    preview.hidden = false;
+    preview.style.left = `${Math.max(0, Math.min(event.clientX + 20, innerWidth - preview.offsetWidth - 8))}px`;
+    preview.style.top = `${Math.max(0, Math.min(event.clientY + 20, innerHeight - preview.offsetHeight - 8))}px`;
+    return color;
+}
+
+function needsPaintColor() {
+    if ((tool === 'paint' || tool === 'fill') && !selected) {
+        notify('Add a palette color or use Color sampler before painting.', true);
+        return true;
+    }
+    return false;
 }
 
 function cellAt(event) {
@@ -285,6 +337,16 @@ canvas.addEventListener('pointerdown', event => {
     event.preventDefault();
     canvas.focus({ preventScroll: true });
     keyboardFocus = false;
+    if (tool === 'sample') {
+        try {
+            render();
+            const color = previewSample(event);
+            addPaletteColor(color);
+            notify(`Selected ${color}. Choose Paint to use it, or sample another color.`);
+        } catch (error) { report(error); }
+        return;
+    }
+    if (needsPaintColor()) return;
     const position = cellAt(event);
     cursor = position;
     stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false };
@@ -293,6 +355,10 @@ canvas.addEventListener('pointerdown', event => {
     render();
 });
 canvas.addEventListener('pointermove', event => {
+    if (project && largeScreen.matches && tool === 'sample') {
+        previewSample(event);
+        return;
+    }
     if (!stroke || stroke.id !== event.pointerId || tool === 'fill' || tool === 'erase-fill') return;
     const position = cellAt(event);
     line(stroke.last.x, stroke.last.y, position.x, position.y, (x, y) => {
@@ -301,7 +367,13 @@ canvas.addEventListener('pointermove', event => {
     stroke.last = position;
     render();
 });
+canvas.addEventListener('pointerleave', () => { $('sample-preview').hidden = true; });
+$('workspace').addEventListener('scroll', () => { $('sample-preview').hidden = true; });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, finishStroke);
+canvas.addEventListener('pointerup', event => {
+    if (event.pointerType === 'touch') $('sample-preview').hidden = true;
+});
+canvas.addEventListener('pointercancel', () => { $('sample-preview').hidden = true; });
 canvas.addEventListener('focus', () => { keyboardFocus = true; render(); });
 canvas.addEventListener('blur', () => { keyboardFocus = false; render(); });
 canvas.addEventListener('keydown', event => {
@@ -317,6 +389,16 @@ canvas.addEventListener('keydown', event => {
     } else if (event.key === ' ' || event.key === 'Enter') {
         event.preventDefault();
         finishStroke();
+        if (tool === 'sample') {
+            try {
+                const color = sampleColor((cursor.x + 0.5) * project.width / project.cols,
+                    (cursor.y + 0.5) * project.height / project.rows);
+                addPaletteColor(color);
+                notify(`Selected ${color}. Choose Paint to use it, or sample another color.`);
+            } catch (error) { report(error); }
+            return;
+        }
+        if (needsPaintColor()) return;
         const before = snapshot();
         if (applyCell(cursor.x, cursor.y)) { remember(before); changed(); render(); }
     }
@@ -325,7 +407,10 @@ canvas.addEventListener('keydown', event => {
 document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishStroke();
     tool = button.dataset.tool;
+    canvas.classList.toggle('sampling', tool === 'sample');
     document.querySelectorAll('[data-tool]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    render();
+    if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
 }));
 
 function undo() {
@@ -402,13 +487,7 @@ $('name').addEventListener('input', () => {
 $('name').addEventListener('blur', () => { if (project) $('name').value = project.name; });
 action('add-color', () => {
     const color = $('new-color').value.toLowerCase();
-    if (!project.palette.includes(color)) {
-        if (project.palette.length >= 32) throw new Error('The demo supports up to 32 palette colors per project.');
-        project.palette.push(color);
-        changed();
-    }
-    selected = color;
-    renderPalette();
+    addPaletteColor(color);
 });
 
 action('upload', () => { $('image-file').click(); });
