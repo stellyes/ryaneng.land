@@ -1,6 +1,6 @@
 import { boxFromCells, copyCells, objectCorners, rasterObject, resizeObject, rotatePoint } from './objects.js';
 
-export function createPlacementEditor({ canvas, getProject, getColor, commitPixels, redraw, updateControls, notify }) {
+export function createPlacementEditor({ canvas, getProject, getColor, getStroke, commitPixels, redraw, updateControls, notify }) {
     const $ = id => document.getElementById(id);
     const overlay = $('object-overlay');
     let object = null;
@@ -72,13 +72,13 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
         if (!['line', 'shape', 'select'].includes(tool)) return false;
         const point = pointAt(event), cell = cellAt(point);
         object = tool === 'line'
-            ? { kind: 'line', a: cell, b: cell }
+            ? { kind: 'line', a: cell, b: cell, stroke: getStroke('line') }
             : { kind: tool === 'select' ? 'selection' : 'shape', ...boxFromCells(cell, cell),
-                shape: $('shape-type').value, filled: $('shape-fill').value === 'filled' };
+                shape: $('shape-type').value, filled: $('shape-fill').value === 'filled', stroke: getStroke('shape') };
         drag = { id: event.pointerId, target: canvas, mode: 'draw', start: cell, before: null };
         canvas.setPointerCapture(event.pointerId);
         refresh();
-        notify(tool === 'select' ? 'Drag to select cells, then Copy and Paste. The border shows the selected dimensions.' :
+        notify(tool === 'select' ? 'Drag to select cells, then Copy or Cut and Paste. The border shows the selected dimensions.' :
             'Adjust the handles or palette color. Click away or Apply to place; Escape cancels.');
         return true;
     }
@@ -131,7 +131,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
         if (!handle) return;
         event.preventDefault();
         event.stopPropagation();
-        handle.focus({ preventScroll: true });
+        // Keep focus off SVG geometry: native SVG focus rings can scale with the grid.
+        (handle instanceof SVGElement ? canvas : handle).focus({ preventScroll: true });
         const point = pointAt(event);
         drag = { id: event.pointerId, target: overlay, mode: handle.dataset.edit, corner: handle.dataset.resize,
             start: point, before: structuredClone(object), angle: Math.atan2(point.y - object.cy, point.x - object.cx) * 180 / Math.PI };
@@ -165,7 +166,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
         $('line-hit').style.display = isLine ? '' : 'none';
         $('box-hit').style.display = isLine ? 'none' : '';
         $('object-help').textContent = object.kind === 'selection'
-            ? 'Copy the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
+            ? 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
             : 'Drag handles to adjust; drag inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape cancels. Content outside the grid is clipped.';
         for (const button of overlay.querySelectorAll('button')) button.hidden = true;
         if (isLine) {
@@ -202,20 +203,38 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
         }
     }
 
-    function copy() {
+    function clearSelection() {
+        releaseDrag();
+        const project = getProject();
+        const x = Math.round(object.cx - object.width / 2), y = Math.round(object.cy - object.height / 2);
+        const cleared = new Map();
+        for (let row = 0; row < object.height; row++) for (let col = 0; col < object.width; col++) {
+            cleared.set((y + row) * project.cols + x + col, null);
+        }
+        object = null;
+        commitPixels(cleared);
+        refresh();
+    }
+
+    function copy(cut = false) {
         if (object?.kind !== 'selection') {
-            notify('Choose Select and drag over a section of the grid before copying.', true);
+            notify(`Choose Select and drag over a section of the grid before ${cut ? 'cutting' : 'copying'}.`, true);
             return;
         }
         releaseDrag();
         clipboard = copyCells(getProject(), object);
+        if (cut) {
+            clearSelection();
+            notify(`Cut ${clipboard.width} x ${clipboard.height} cells. The original area is transparent. Paste to place the cut section; Undo restores the removal.`);
+            return;
+        }
         updateControls();
         notify(`Copied ${clipboard.width} x ${clipboard.height} cells. Paste to create an editable duplicate.`);
     }
 
     function paste() {
         if (!clipboard) {
-            notify('Copy a grid selection before pasting.', true);
+            notify('Copy or Cut a grid selection before pasting.', true);
             return;
         }
         commit();
@@ -230,6 +249,13 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
 
     function keydown(event) {
         if (!object || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
+        if (event.key === 'Delete' && object.kind === 'selection') {
+            event.preventDefault();
+            clearSelection();
+            canvas.focus({ preventScroll: true });
+            notify('Selected pixels deleted to transparency. Undo restores them. The clipboard is unchanged.');
+            return true;
+        }
         if (event.key === 'Escape') { event.preventDefault(); cancel(); return true; }
         if (event.key === 'Enter' && (event.target === canvas || event.target.closest('#object-overlay'))) {
             event.preventDefault();
@@ -266,9 +292,9 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
     }
 
     function startKeyboard(tool, cell) {
-        object = tool === 'line' ? { kind: 'line', a: { ...cell }, b: { ...cell } } :
+        object = tool === 'line' ? { kind: 'line', a: { ...cell }, b: { ...cell }, stroke: getStroke('line') } :
             { kind: tool === 'select' ? 'selection' : 'shape', ...boxFromCells(cell, cell),
-                shape: $('shape-type').value, filled: $('shape-fill').value === 'filled' };
+                shape: $('shape-type').value, filled: $('shape-fill').value === 'filled', stroke: getStroke('shape') };
         refresh();
         overlay.querySelector(tool === 'line' ? '[data-edit="b"]' : '[data-resize="se"]').focus({ preventScroll: true });
         notify('Use arrow keys on the focused handle to adjust. Enter applies; Escape cancels.');
@@ -292,13 +318,19 @@ export function createPlacementEditor({ canvas, getProject, getColor, commitPixe
             refresh();
         }
     });
+    function setStroke(width) {
+        if (object?.kind !== 'line' && object?.kind !== 'shape') return;
+        object.stroke = width;
+        refresh();
+    }
     $('placement-apply').addEventListener('click', commit);
     $('placement-cancel').addEventListener('click', cancel);
 
     return {
-        begin, commit, cancel, copy, paste, keydown, startKeyboard, refresh, render, preview,
+        begin, commit, cancel, copy, cut: () => copy(true), paste, keydown, startKeyboard, refresh, render, preview, setStroke,
         get active() { return Boolean(object); },
         get kind() { return object?.kind; },
+        get filled() { return Boolean(object?.filled); },
         get selecting() { return object?.kind === 'selection'; },
         get canPaste() { return Boolean(clipboard); },
         get dragging() { return Boolean(drag); },

@@ -38,7 +38,20 @@ function polygonContains(vertices, x, y) {
     return inside;
 }
 
-export function shapeMask(shape, width, height, filled) {
+export const MAX_STROKE = 20;
+
+export function strokeWidth(value) {
+    const width = Number(value);
+    return Number.isInteger(width) && width >= 1 && width <= MAX_STROKE ? width : 1;
+}
+
+// Square brush centered on (x, y); even widths extend one extra cell right/down.
+export function brush(x, y, size, visit) {
+    const width = strokeWidth(size), offset = Math.floor((width - 1) / 2);
+    for (let dy = 0; dy < width; dy++) for (let dx = 0; dx < width; dx++) visit(x - offset + dx, y - offset + dy);
+}
+
+export function shapeMask(shape, width, height, filled, stroke = 1) {
     const mask = Array(width * height).fill(false);
     let vertices;
     if (shape === 'triangle') vertices = [{ x: width / 2, y: 0 }, { x: width, y: height }, { x: 0, y: height }];
@@ -60,8 +73,27 @@ export function shapeMask(shape, width, height, filled) {
         line(pixel(a.x, width), pixel(a.y, height), pixel(b.x, width), pixel(b.y, height), (x, y) => { mask[y * width + x] = true; });
     });
     if (filled) return mask;
-    return mask.map((value, i) => value && (i % width === 0 || i % width === width - 1 || i < width || i >= width * (height - 1) ||
-        !mask[i - 1] || !mask[i + 1] || !mask[i - width] || !mask[i + width]));
+    // Keep shape cells within `stroke` steps of the outside (or the bounds) to form the outline.
+    const limit = strokeWidth(stroke), depth = new Int32Array(width * height), queue = [];
+    for (let i = 0; i < mask.length; i++) {
+        const x = i % width;
+        if (mask[i] && (x === 0 || x === width - 1 || i < width || i >= width * (height - 1) ||
+            !mask[i - 1] || !mask[i + 1] || !mask[i - width] || !mask[i + width])) {
+            depth[i] = 1;
+            queue.push(i);
+        }
+    }
+    for (let q = 0; q < queue.length; q++) {
+        const i = queue[q], x = i % width;
+        if (depth[i] >= limit) continue;
+        const neighbours = [x > 0 ? i - 1 : -1, x < width - 1 ? i + 1 : -1, i - width, i + width];
+        for (const n of neighbours) {
+            if (n < 0 || n >= mask.length || !mask[n] || depth[n]) continue;
+            depth[n] = depth[i] + 1;
+            queue.push(n);
+        }
+    }
+    return mask.map((value, i) => value && depth[i] > 0);
 }
 
 export function rasterObject(object, cols, rows, color) {
@@ -71,12 +103,12 @@ export function rasterObject(object, cols, rows, color) {
     };
     if (object.kind === 'selection') return pixels;
     if (object.kind === 'line') {
-        line(object.a.x, object.a.y, object.b.x, object.b.y, (x, y) => set(x, y, color));
+        line(object.a.x, object.a.y, object.b.x, object.b.y, (x, y) => brush(x, y, object.stroke, (bx, by) => set(bx, by, color)));
         return pixels;
     }
     const source = object.kind === 'paste' ? object.source : {
         width: object.width, height: object.height,
-        cells: shapeMask(object.shape, object.width, object.height, object.filled).map(value => value ? color : null),
+        cells: shapeMask(object.shape, object.width, object.height, object.filled, object.stroke).map(value => value ? color : null),
     };
     const corners = objectCorners(object);
     const left = Math.max(0, Math.floor(Math.min(...corners.map(p => p.x))));

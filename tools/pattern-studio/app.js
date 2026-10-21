@@ -1,6 +1,7 @@
 import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from './model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
+import { MAX_STROKE, brush, strokeWidth } from './objects.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -18,6 +19,7 @@ let stroke = null;
 let pan = null;
 let cursor = { x: 0, y: 0 };
 let keyboardFocus = false;
+let pointerFocus = false;
 let timer;
 let dirty = false;
 let revision = 0;
@@ -27,9 +29,16 @@ let storageError = null;
 let zoom = 1;
 let crop = null;
 let cropDrag = null;
+let settingsPanel = null;
+const STROKE_KEY = 'pattern-studio-stroke-widths';
+const strokeWidths = { paint: 1, line: 1, shape: 1 };
+try {
+    const saved = JSON.parse(localStorage.getItem(STROKE_KEY) || '{}');
+    for (const key of Object.keys(strokeWidths)) strokeWidths[key] = strokeWidth(saved[key]);
+} catch { /* Widths fall back to 1 when storage is unavailable. */ }
 const placement = createPlacementEditor({
-    canvas, getProject: () => project, getColor: () => selected,
-    redraw: render, updateControls, notify,
+    canvas, getProject: () => project, getColor: () => selected, getStroke: kind => strokeWidths[kind],
+    redraw: () => renderPlacement(), updateControls, notify,
     commitPixels(pixels) {
         if (!project || !Array.from(pixels).some(([index, color]) => project.cells[index] !== color)) return;
         remember(snapshot());
@@ -56,9 +65,20 @@ function action(id, handler) {
     $(id).addEventListener('click', () => Promise.resolve().then(() => {
         finishPan();
         finishStroke();
-        if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'copy', 'paste'].includes(id)) placement.commit();
+        if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'delete-color', 'copy', 'cut', 'paste'].includes(id)) placement.commit();
     }).then(handler).catch(report));
 }
+$('file-menu').addEventListener('click', event => {
+    if (event.target.closest('.file-actions button')) $('file-menu').open = false;
+});
+$('file-menu').addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        $('file-menu').open = false;
+        $('file-toggle').focus({ preventScroll: true });
+    }
+});
 
 const storeReady = openStore().then(value => { store = value; }).catch(error => {
     storageError = error;
@@ -158,6 +178,28 @@ async function protectUnsaved() {
     }
 }
 
+function toolPanel() {
+    return ['paint', 'line', 'shape', 'select'].includes(tool) ? 'object' : null;
+}
+
+function activeStrokeKind() {
+    if (placement.active) {
+        if (placement.kind === 'line') return 'line';
+        return placement.kind === 'shape' && !placement.filled ? 'shape' : null;
+    }
+    if (tool === 'shape') return $('shape-fill').value === 'filled' ? null : 'shape';
+    return ['paint', 'line'].includes(tool) ? tool : null;
+}
+
+function setStrokeWidth(value) {
+    const kind = activeStrokeKind();
+    if (!kind) return;
+    strokeWidths[kind] = value;
+    try { localStorage.setItem(STROKE_KEY, JSON.stringify(strokeWidths)); } catch { /* Width still applies for this visit. */ }
+    placement.setStroke(value);
+    updateControls();
+}
+
 function updateControls() {
     const active = Boolean(project);
     $('workspace-controls').hidden = !active;
@@ -167,13 +209,25 @@ function updateControls() {
     $('undo').disabled = !active || Boolean(crop) || (!history.length && !placement.active);
     $('redo').disabled = !active || Boolean(crop) || placement.active || !future.length;
     $('copy').disabled = !active || Boolean(crop) || !placement.selecting;
+    $('cut').disabled = !active || Boolean(crop) || !placement.selecting;
     $('paste').disabled = !active || Boolean(crop) || !placement.canPaste;
-    $('object-settings').hidden = !active || Boolean(crop) || (!placement.active && !['line', 'shape', 'select'].includes(tool));
+    if (placement.active && !crop) settingsPanel = 'object';
+    for (const panel of ['object', 'grid', 'crop']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
+    $('settings-dock').hidden = !active || !settingsPanel;
+    $('grid-toggle').setAttribute('aria-expanded', String(active && settingsPanel === 'grid'));
+    $('crop-start').setAttribute('aria-expanded', String(active && settingsPanel === 'crop'));
     $('shape-options').hidden = tool !== 'shape' || (placement.active && placement.kind !== 'shape');
     $('object-transform').hidden = placement.active ? !['shape', 'paste'].includes(placement.kind) : tool !== 'shape';
     $('placement-apply').disabled = !placement.active || placement.selecting;
     $('placement-cancel').disabled = !placement.active;
     for (const key of ['width', 'height', 'angle']) $(`object-${key}`).disabled = !placement.active;
+    const strokeKind = activeStrokeKind();
+    $('stroke-options').hidden = !strokeKind;
+    $('placement-actions').hidden = $('object-help').hidden = tool === 'paint' && !placement.active;
+    if (strokeKind) {
+        $('stroke-label').textContent = { paint: 'Brush size', line: 'Line width', shape: 'Outline width' }[strokeKind];
+        $('stroke-width').value = $('stroke-range').value = strokeWidths[strokeKind];
+    }
     $('save-now').disabled = !active;
     $('zoom-out').disabled = !active || zoom <= 1;
     $('zoom-in').disabled = !active || zoom >= 8;
@@ -212,6 +266,7 @@ function renderPalette() {
     }
     $('add-color').disabled = !project || Boolean(crop);
     $('new-color').disabled = !project || Boolean(crop);
+    $('delete-color').disabled = !project || Boolean(crop) || !selected;
 }
 
 $('palette-menu').addEventListener('keydown', event => {
@@ -222,6 +277,12 @@ $('palette-menu').addEventListener('keydown', event => {
         $('palette-toggle').focus({ preventScroll: true });
     }
 });
+document.addEventListener('pointerdown', event => {
+    for (const id of ['palette-menu', 'file-menu']) {
+        const menu = $(id);
+        if (menu.open && !menu.contains(event.target)) menu.open = false;
+    }
+}, true);
 
 function render() {
     $('sample-preview').hidden = true;
@@ -238,41 +299,155 @@ function render() {
     const dpr = Math.min(devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    const bitmapWidth = Math.round(width * dpr), bitmapHeight = Math.round(height * dpr);
+    // Reassigning canvas dimensions reallocates the bitmap, so only do it when the size changes.
+    if (canvas.width !== bitmapWidth || canvas.height !== bitmapHeight) {
+        canvas.width = bitmapWidth;
+        canvas.height = bitmapHeight;
+    }
+    paintedTiles = null;
+    if (!deferTiles) paintVisibleTiles();
+    drawnPreview = previewBounds();
+    drawnCursor = cursorVisible();
+    renderCrop();
+    placement.render();
+}
+
+// Only the tiles near the viewport are painted on a full render; the rest are painted as they
+// scroll into view, so zooming costs the same at 800% as at 100%.
+const TILE = 32;
+let paintedTiles = null, deferTiles = false;
+
+function paintVisibleTiles() {
+    if (!project || !canvas.width) return;
+    const across = Math.ceil(project.cols / TILE), down = Math.ceil(project.rows / TILE);
+    if (!paintedTiles || paintedTiles.length !== across * down) paintedTiles = new Uint8Array(across * down);
+    const workspace = $('workspace'), rect = canvas.getBoundingClientRect(), view = workspace.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const toCol = x => Math.floor((x - rect.left) / rect.width * project.cols / TILE);
+    const toRow = y => Math.floor((y - rect.top) / rect.height * project.rows / TILE);
+    const tx0 = Math.max(0, toCol(view.left) - 1), tx1 = Math.min(across - 1, toCol(view.left + workspace.clientWidth) + 1);
+    const ty0 = Math.max(0, toRow(view.top) - 1), ty1 = Math.min(down - 1, toRow(view.top + workspace.clientHeight) + 1);
+    let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+    for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+        if (paintedTiles[ty * across + tx]) continue;
+        minX = Math.min(minX, tx); maxX = Math.max(maxX, tx);
+        minY = Math.min(minY, ty); maxY = Math.max(maxY, ty);
+    }
+    if (maxX < 0) return;
+    for (let ty = minY; ty <= maxY; ty++) paintedTiles.fill(1, ty * across + minX, ty * across + maxX + 1);
+    renderCells(minX * TILE, minY * TILE, (maxX + 1) * TILE - 1, (maxY + 1) * TILE - 1);
+}
+
+const cellLayer = document.createElement('canvas');
+// CPU-backed: it is rewritten with putImageData on every edit, which avoids GPU upload/readback churn.
+const cellLayerContext = cellLayer.getContext('2d', { willReadFrequently: true });
+let cellImage = null, cellWords = null;
+const colorWords = new Map();
+const colorProbe = document.createElement('canvas').getContext('2d');
+
+// Converts a CSS color to a little-endian RGBA word for the cell layer's pixel buffer.
+function colorWord(color) {
+    let word = colorWords.get(color);
+    if (word !== undefined) return word;
+    let hex = /^#[0-9a-f]{6}$/i.test(color) ? color : null;
+    if (!hex) {
+        colorProbe.fillStyle = '#000000';
+        colorProbe.fillStyle = color;
+        hex = /^#[0-9a-f]{6}$/i.test(colorProbe.fillStyle) ? colorProbe.fillStyle : '#000000';
+    }
+    const value = parseInt(hex.slice(1), 16);
+    word = (0xff000000 | (value & 0xff) << 16 | (value & 0xff00) | (value >> 16 & 0xff)) >>> 0;
+    colorWords.set(color, word);
+    return word;
+}
+
+function updateCellLayer(x0, y0, x1, y1, withPreview) {
+    if (cellLayer.width !== project.cols || cellLayer.height !== project.rows || !cellImage) {
+        cellLayer.width = project.cols;
+        cellLayer.height = project.rows;
+        cellImage = cellLayerContext.createImageData(project.cols, project.rows);
+        cellWords = new Uint32Array(cellImage.data.buffer);
+    }
+    const cells = project.cells, cols = project.cols;
+    for (let y = y0; y < y1; y++) {
+        for (let index = y * cols + x0, end = y * cols + x1; index < end; index++) {
+            const color = cells[index];
+            cellWords[index] = color === null ? 0 : colorWord(color);
+        }
+    }
+    if (withPreview) for (const [index, color] of placement.preview()) {
+        const x = index % cols, y = (index - x) / cols;
+        if (x >= x0 && x < x1 && y >= y0 && y < y1) cellWords[index] = colorWord(color);
+    }
+    cellLayerContext.putImageData(cellImage, 0, 0, x0, y0, x1 - x0, y1 - y0);
+}
+
+// Cell bounds (inclusive) of the floating line/shape/paste preview, or null when none.
+function previewBounds() {
+    if (!project || crop || tool === 'sample') return null;
+    let minX = Infinity, minY = Infinity, maxX = -1, maxY = -1;
+    for (const index of placement.preview().keys()) {
+        const x = index % project.cols, y = (index - x) / project.cols;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+    }
+    return maxX < 0 ? null : { minX, minY, maxX, maxY };
+}
+let drawnPreview = null, drawnCursor = false;
+
+function cursorVisible() {
+    return Boolean(project) && !crop && !placement.active && tool !== 'move' && keyboardFocus;
+}
+
+// Placement edits only change the cells under the old and new previews, so repaint just those boxes.
+function renderPlacement() {
+    if (!project || !largeScreen.matches || !canvas.width) return render();
+    const next = previewBounds();
+    for (const box of [drawnPreview, next]) if (box) renderCells(box.minX, box.minY, box.maxX, box.maxY);
+    drawnPreview = next;
+    if (drawnCursor !== cursorVisible()) renderCells(cursor.x, cursor.y, cursor.x, cursor.y);
+    drawnCursor = cursorVisible();
+    placement.render();
+}
+
+function paintLayers(x0, y0, x1, y1) {
+    const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
     context.setTransform(canvas.width / project.width, 0, 0, canvas.height / project.height, 0, 0);
     context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, project.width, project.height);
+    context.fillRect(x0 * cellWidth, y0 * cellHeight, (x1 - x0) * cellWidth, (y1 - y0) * cellHeight);
     if (crop || tool === 'sample' || $('reference-toggle').checked) {
         context.globalAlpha = crop || tool === 'sample' ? 1 : 0.6;
-        context.drawImage(reference, 0, 0, project.width, project.height);
+        // Drawing only the needed part of the reference keeps tile repaints proportional to their size.
+        const sx = x0 * cellWidth, sy = y0 * cellHeight, sw = (x1 - x0) * cellWidth, sh = (y1 - y0) * cellHeight;
+        context.drawImage(reference, sx, sy, sw, sh, sx, sy, sw, sh);
         context.globalAlpha = 1;
     }
-    const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
-    if (crop || tool !== 'sample') project.cells.forEach((color, index) => {
-        if (color === null) return;
-        context.fillStyle = color;
-        context.fillRect(index % project.cols * cellWidth, Math.floor(index / project.cols) * cellHeight, cellWidth, cellHeight);
-    });
-    if (!crop && tool !== 'sample') for (const [index, color] of placement.preview()) {
-        context.fillStyle = color;
-        context.fillRect(index % project.cols * cellWidth, Math.floor(index / project.cols) * cellHeight, cellWidth, cellHeight);
+    if (crop || tool !== 'sample') {
+        // Cells live in a 1-pixel-per-cell layer that is scaled up in one draw call.
+        updateCellLayer(x0, y0, x1, y1, !crop);
+        context.imageSmoothingEnabled = false;
+        context.drawImage(cellLayer, x0, y0, x1 - x0, y1 - y0,
+            x0 * cellWidth, y0 * cellHeight, (x1 - x0) * cellWidth, (y1 - y0) * cellHeight);
+        context.imageSmoothingEnabled = true;
     }
     if (!crop && tool !== 'sample' && $('lines-toggle').checked) {
         context.strokeStyle = 'rgba(30, 45, 35, 0.3)';
         context.lineWidth = project.width / canvas.width;
         context.beginPath();
-        for (let x = 0; x <= project.cols; x++) {
-            context.moveTo(x * cellWidth, 0);
-            context.lineTo(x * cellWidth, project.height);
+        for (let x = x0; x <= x1; x++) {
+            context.moveTo(x * cellWidth, y0 * cellHeight);
+            context.lineTo(x * cellWidth, y1 * cellHeight);
         }
-        for (let y = 0; y <= project.rows; y++) {
-            context.moveTo(0, y * cellHeight);
-            context.lineTo(project.width, y * cellHeight);
+        for (let y = y0; y <= y1; y++) {
+            context.moveTo(x0 * cellWidth, y * cellHeight);
+            context.lineTo(x1 * cellWidth, y * cellHeight);
         }
         context.stroke();
     }
-    if (!crop && !placement.active && tool !== 'move' && keyboardFocus) {
+    if (cursorVisible()) {
         context.strokeStyle = '#ffffff';
         context.lineWidth = 3 * project.width / canvas.width;
         context.strokeRect(cursor.x * cellWidth, cursor.y * cellHeight, cellWidth, cellHeight);
@@ -280,8 +455,29 @@ function render() {
         context.lineWidth = project.width / canvas.width;
         context.strokeRect(cursor.x * cellWidth, cursor.y * cellHeight, cellWidth, cellHeight);
     }
-    renderCrop();
-    placement.render();
+}
+
+// Repaints only the cells in the inclusive range, clipped to whole device pixels so the
+// result matches a full render without redrawing all cells on every pointer move.
+function renderCells(minX, minY, maxX, maxY) {
+    if (!project || !canvas.width || !canvas.height) return render();
+    const scaleX = canvas.width / project.cols, scaleY = canvas.height / project.rows;
+    const left = Math.max(0, Math.floor(Math.max(0, minX) * scaleX) - 1);
+    const top = Math.max(0, Math.floor(Math.max(0, minY) * scaleY) - 1);
+    const right = Math.min(canvas.width, Math.ceil((Math.min(project.cols - 1, maxX) + 1) * scaleX) + 1);
+    const bottom = Math.min(canvas.height, Math.ceil((Math.min(project.rows - 1, maxY) + 1) * scaleY) + 1);
+    if (right <= left || bottom <= top) return;
+    context.save();
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.beginPath();
+    context.rect(left, top, right - left, bottom - top);
+    context.clip();
+    // One extra cell on every side covers antialiased edges and gridlines that touch the clip.
+    paintLayers(
+        Math.max(0, Math.floor(left / scaleX) - 1), Math.max(0, Math.floor(top / scaleY) - 1),
+        Math.min(project.cols, Math.ceil(right / scaleX) + 1), Math.min(project.rows, Math.ceil(bottom / scaleY) + 1),
+    );
+    context.restore();
 }
 
 async function decodeImage(src) {
@@ -302,6 +498,7 @@ async function activate(data) {
     prepareSampler();
     selected = data.palette[0] || null;
     tool = 'paint';
+    settingsPanel = toolPanel();
     canvas.classList.remove('sampling');
     $('workspace').classList.remove('moving');
     document.querySelectorAll('[data-tool]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.tool === tool)));
@@ -398,10 +595,27 @@ function applyCell(x, y) {
     if (tool === 'fill') {
         return flood(project.cells, project.cols, project.rows, x, y, color);
     }
+    if (tool === 'paint') {
+        let painted = false;
+        brush(x, y, strokeWidths.paint, (bx, by) => {
+            if (bx < 0 || by < 0 || bx >= project.cols || by >= project.rows) return;
+            const index = by * project.cols + bx;
+            if (project.cells[index] !== color) { project.cells[index] = color; painted = true; }
+        });
+        return painted;
+    }
     const index = y * project.cols + x;
     if (project.cells[index] === color) return false;
     project.cells[index] = color;
     return true;
+}
+
+function renderStroke(from, to) {
+    const reach = tool === 'paint' ? strokeWidth(strokeWidths.paint) : 1;
+    renderCells(
+        Math.min(from.x, to.x) - reach, Math.min(from.y, to.y) - reach,
+        Math.max(from.x, to.x) + reach, Math.max(from.y, to.y) + reach,
+    );
 }
 
 function finishStroke() {
@@ -418,7 +632,9 @@ function finishStroke() {
 canvas.addEventListener('pointerdown', event => {
     if (!project || crop || tool === 'move' || !largeScreen.matches || event.button !== 0 || stroke || !event.isPrimary) return;
     event.preventDefault();
+    pointerFocus = true;
     canvas.focus({ preventScroll: true });
+    pointerFocus = false;
     keyboardFocus = false;
     if (placement.active) {
         placement.begin(event, tool);
@@ -435,12 +651,17 @@ canvas.addEventListener('pointerdown', event => {
     }
     if (needsPaintColor()) return;
     if (placement.begin(event, tool)) return;
-    const position = cellAt(event);
+    const position = cellAt(event), previousCursor = cursor;
     cursor = position;
     stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false };
     canvas.setPointerCapture(event.pointerId);
     stroke.changed = applyCell(position.x, position.y);
-    render();
+    if (tool === 'fill') return render();
+    if (stroke.changed) renderStroke(position, position);
+    if (drawnCursor) {
+        renderCells(previousCursor.x, previousCursor.y, previousCursor.x, previousCursor.y);
+        drawnCursor = false;
+    }
 });
 canvas.addEventListener('pointermove', event => {
     if (project && !crop && largeScreen.matches && tool === 'sample') {
@@ -449,21 +670,36 @@ canvas.addEventListener('pointermove', event => {
     }
     if (!stroke || stroke.id !== event.pointerId || tool === 'fill') return;
     const position = cellAt(event);
+    let painted = false;
     line(stroke.last.x, stroke.last.y, position.x, position.y, (x, y) => {
-        if (applyCell(x, y)) stroke.changed = true;
+        if (applyCell(x, y)) painted = true;
     });
+    if (painted) {
+        stroke.changed = true;
+        renderStroke(stroke.last, position);
+    }
     stroke.last = position;
-    render();
 });
 canvas.addEventListener('pointerleave', () => { $('sample-preview').hidden = true; });
-$('workspace').addEventListener('scroll', () => { $('sample-preview').hidden = true; });
+$('workspace').addEventListener('scroll', () => {
+    $('sample-preview').hidden = true;
+    paintVisibleTiles();
+});
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, finishStroke);
 canvas.addEventListener('pointerup', event => {
     if (event.pointerType === 'touch') $('sample-preview').hidden = true;
 });
 canvas.addEventListener('pointercancel', () => { $('sample-preview').hidden = true; });
-canvas.addEventListener('focus', () => { keyboardFocus = true; render(); });
-canvas.addEventListener('blur', () => { keyboardFocus = false; render(); });
+canvas.addEventListener('focus', () => {
+    if (pointerFocus) return;
+    keyboardFocus = true;
+    renderPlacement();
+});
+canvas.addEventListener('blur', () => {
+    if (!keyboardFocus) return;
+    keyboardFocus = false;
+    renderPlacement();
+});
 
 function finishPan() {
     if (!pan) return;
@@ -480,12 +716,13 @@ $('workspace').addEventListener('pointerdown', event => {
     const rect = workspace.getBoundingClientRect();
     if (event.clientX >= rect.left + workspace.clientWidth || event.clientY >= rect.top + workspace.clientHeight) return;
     event.preventDefault();
+    pointerFocus = true;
     canvas.focus({ preventScroll: true });
+    pointerFocus = false;
     keyboardFocus = false;
     pan = { id: event.pointerId, x: event.clientX, y: event.clientY, left: workspace.scrollLeft, top: workspace.scrollTop };
     workspace.setPointerCapture(event.pointerId);
     workspace.classList.add('panning');
-    render();
 });
 $('workspace').addEventListener('pointermove', event => {
     if (!pan || event.pointerId !== pan.id) return;
@@ -546,6 +783,7 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     finishStroke();
     placement.commit();
     tool = button.dataset.tool;
+    settingsPanel = toolPanel();
     canvas.classList.toggle('sampling', tool === 'sample');
     $('workspace').classList.toggle('moving', tool === 'move');
     $('sample-preview').hidden = true;
@@ -555,7 +793,7 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
     if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. Choose Paint to resume drawing.');
     if (['line', 'shape', 'select'].includes(tool)) notify(tool === 'select'
-        ? 'Drag a selection on the grid, then Copy and Paste to duplicate it.'
+        ? 'Drag a selection on the grid, then Copy or Cut and Paste.'
         : 'Drag to draw. Adjust handles and palette color, then click away or Apply to finalize.');
 }));
 
@@ -582,10 +820,11 @@ function redo() {
 action('undo', undo);
 action('redo', redo);
 action('copy', () => placement.copy());
+action('cut', () => placement.cut());
 action('paste', () => placement.paste());
 document.addEventListener('pointerdown', event => {
     if (!placement.active || event.button !== 0 || !event.isPrimary ||
-        event.target.closest('#canvas-stage, #object-settings, #palette-menu, .zoom-bar, [data-tool], #copy, #paste, #undo, #redo')) return;
+        event.target.closest('#canvas-stage, #object-settings, #palette-menu, .zoom-bar, [data-tool], #copy, #cut, #paste, #undo, #redo')) return;
     placement.commit();
 }, true);
 document.addEventListener('keydown', event => {
@@ -597,31 +836,60 @@ document.addEventListener('keydown', event => {
         return;
     }
     const key = event.key.toLowerCase();
-    if ((event.ctrlKey || event.metaKey) && ['c', 'v'].includes(key)) {
+    if ((event.ctrlKey || event.metaKey) && ['c', 'x', 'v'].includes(key)) {
         event.preventDefault();
         finishStroke();
         if (key === 'c') placement.copy();
+        else if (key === 'x') placement.cut();
         else placement.paste();
     } else if (!(event.ctrlKey || event.metaKey)) placement.keydown(event);
 });
-function setZoom(value) {
+function setZoom(value, anchor) {
     if (!project) return;
     finishPan();
     finishStroke();
     const workspace = $('workspace');
     const previous = canvas.getBoundingClientRect();
     const viewport = workspace.getBoundingClientRect();
-    const centerX = (viewport.left + workspace.clientWidth / 2 - previous.left) / previous.width;
-    const centerY = (viewport.top + workspace.clientHeight / 2 - previous.top) / previous.height;
+    const anchorX = anchor ? anchor.x : viewport.left + workspace.clientWidth / 2;
+    const anchorY = anchor ? anchor.y : viewport.top + workspace.clientHeight / 2;
+    const centerX = (anchorX - previous.left) / previous.width;
+    const centerY = (anchorY - previous.top) / previous.height;
     zoom = Math.max(1, Math.min(8, value));
     updateControls();
-    render();
+    // Paint after the scroll is re-anchored so only the tiles that end up visible are drawn.
+    deferTiles = true;
+    try { render(); } finally { deferTiles = false; }
     const next = canvas.getBoundingClientRect();
-    workspace.scrollLeft += next.left + centerX * next.width - viewport.left - workspace.clientWidth / 2;
-    workspace.scrollTop += next.top + centerY * next.height - viewport.top - workspace.clientHeight / 2;
+    workspace.scrollLeft += next.left + centerX * next.width - anchorX;
+    workspace.scrollTop += next.top + centerY * next.height - anchorY;
+    paintVisibleTiles();
 }
 action('zoom-in', () => setZoom(zoom + 0.25));
 action('zoom-out', () => setZoom(zoom - 0.25));
+document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey) ||
+        !project || !largeScreen.matches || document.querySelector('dialog[open]')) return;
+    const step = ['+', '='].includes(event.key) ? 1 : ['-', '_'].includes(event.key) ? -1 : 0;
+    if (!step) return;
+    // Zoom the pattern instead of the browser page; at the limits the shortcut is still consumed.
+    event.preventDefault();
+    const button = $(step > 0 ? 'zoom-in' : 'zoom-out');
+    if (!button.disabled) setZoom(zoom + step * 0.25);
+});
+let wheelZoomDelta = 0;
+$('workspace').addEventListener('wheel', event => {
+    if (!(event.ctrlKey || event.metaKey) || !project || crop || !largeScreen.matches) return;
+    event.preventDefault();
+    // Trackpad pinches send many small ctrl+wheel deltas; accumulate them into 25% steps.
+    const scale = event.deltaMode === 1 ? 33 : event.deltaMode === 2 ? 400 : 1;
+    wheelZoomDelta += event.deltaY * scale;
+    if (Math.abs(wheelZoomDelta) < 50) return;
+    const step = wheelZoomDelta < 0 ? 1 : -1;
+    wheelZoomDelta = 0;
+    const next = Math.max(1, Math.min(8, zoom + step * 0.25));
+    if (next !== zoom) setZoom(next, { x: event.clientX, y: event.clientY });
+}, { passive: false });
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey ||
         !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'z' ||
@@ -636,8 +904,8 @@ document.addEventListener('keydown', event => {
     } catch (error) { report(error); }
 });
 action('grid-toggle', () => {
-    $('grid-settings').hidden = !$('grid-settings').hidden;
-    $('grid-toggle').setAttribute('aria-expanded', String(!$('grid-settings').hidden));
+    settingsPanel = settingsPanel === 'grid' ? null : 'grid';
+    updateControls();
 });
 function clearGridError() {
     $('grid-error').textContent = '';
@@ -733,8 +1001,7 @@ function exitCrop(applied = false) {
     endCropDrag();
     const previous = crop.previousView;
     crop = null;
-    $('crop-settings').hidden = true;
-    $('crop-start').setAttribute('aria-expanded', 'false');
+    settingsPanel = toolPanel();
     zoom = applied ? 1 : previous.zoom;
     updateControls();
     renderPalette();
@@ -753,10 +1020,7 @@ action('crop-start', () => {
     zoom = 1;
     $('crop-ratio').value = 'free';
     $('crop-error').textContent = '';
-    $('grid-settings').hidden = true;
-    $('grid-toggle').setAttribute('aria-expanded', 'false');
-    $('crop-settings').hidden = false;
-    $('crop-start').setAttribute('aria-expanded', 'true');
+    settingsPanel = 'crop';
     updateControls();
     renderPalette();
     render();
@@ -885,6 +1149,20 @@ document.addEventListener('keydown', event => {
     }
 });
 for (const id of ['reference-toggle', 'lines-toggle']) $(id).addEventListener('change', render);
+$('stroke-range').addEventListener('input', () => setStrokeWidth(Number($('stroke-range').value)));
+$('stroke-width').addEventListener('change', () => {
+    const input = $('stroke-width'), value = Number(input.value);
+    if (!input.value.trim() || !Number.isInteger(value) || value < 1 || value > MAX_STROKE) {
+        notify(`Width must be a whole number from 1 to ${MAX_STROKE}.`, true);
+        updateControls();
+        return;
+    }
+    setStrokeWidth(value);
+});
+$('stroke-width').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); event.target.dispatchEvent(new Event('change')); }
+});
+$('shape-fill').addEventListener('change', updateControls);
 $('name').addEventListener('input', () => {
     project.name = $('name').value.trim() || 'Untitled pattern';
     changed();
@@ -893,6 +1171,20 @@ $('name').addEventListener('blur', () => { if (project) $('name').value = projec
 action('add-color', () => {
     const color = $('new-color').value.toLowerCase();
     addPaletteColor(color);
+});
+action('delete-color', () => {
+    if (!project || crop || !selected) return;
+    const color = selected;
+    const index = project.palette.indexOf(color);
+    if (index < 0) throw new Error('Select a color in the palette before deleting it.');
+    project.palette.splice(index, 1);
+    selected = project.palette[Math.min(index, project.palette.length - 1)] || null;
+    if (selected) $('new-color').value = selected;
+    changed();
+    renderPalette();
+    placement.refresh();
+    notify(`Removed ${color} from the palette. Painted pixels are unchanged.`);
+    if (!selected) $('new-color').focus({ preventScroll: true });
 });
 
 action('upload', () => { $('image-file').click(); });

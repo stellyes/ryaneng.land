@@ -25,9 +25,17 @@ controls stay on one row.
   of at most 500 pixels.
 - The icon toolbar is divided into Drawing (Paint, Bucket fill, Eraser, Line,
   Shapes), Canvas (Move, Color sampler, Grid size, Crop), Selection/clipboard
-  (Select, Copy, Paste), and History (Undo, Redo) groups.
+  (Select, Copy, Paste, Cut), and History (Undo, Redo) groups.
   Hover or keyboard-focus an icon for its plain-text tooltip; each button also
   has an accessible name. Erase block has been removed.
+- Tool settings appear in a fixed right-hand panel inside the canvas frame,
+  above Zoom Controls, rather than below the toolbar. Only one settings panel
+  is visible at a time: choosing Grid, Crop, or a drawing/selection tool replaces
+  the previous panel. The panel scrolls internally when needed and stays put
+  while zooming or panning, without resizing the canvas viewport.
+- The top-right File dropdown contains Projects, Download project, and Export
+  pattern. Selecting an action, clicking/tapping outside, or pressing Escape
+  closes the dropdown. Download/export remain unavailable without a project.
 - Paint by click, stylus, or drag, use connected four-neighbor bucket fill,
   or erase individual cells. Arrow keys and Space
   provide keyboard painting. Undo/redo includes strokes, fills, and grid resizing.
@@ -42,6 +50,13 @@ controls stay on one row.
   (0-359 degrees clockwise) rotates around its center. Equal width/height makes
   the oval a circle in grid coordinates. Style, shape, and palette color remain
   editable until placement is finalized.
+- Pencil, Line, and outline Shapes each remember their own width (1-20 cells),
+  set with the slider or number field in the Tool settings panel (labelled Brush
+  size, Line width, or Outline width). The pencil uses a square brush centered on
+  the cell (even sizes extend right/down); lines stamp that brush along their
+  path; outlines grow inward so the shape keeps its size. Changing Line/Outline
+  width updates the floating preview before it is placed. Filled shapes hide the
+  control. Widths are kept in this browser's local storage.
 - Select highlights an inclusive rectangular section with a dimension label.
   Use Copy then Paste, or Ctrl/Cmd+C and Ctrl/Cmd+V, to create an independent,
   floating duplicate at the visible view center. Pasted sections retain the
@@ -50,6 +65,14 @@ controls stay on one row.
   is local to this editor tab, supports repeat pastes and different projects,
   and resets on reload; it does not read or write the device's system clipboard.
   Text/form fields retain their native clipboard shortcuts.
+- Cut (scissors icon or Ctrl/Cmd+X) copies the selected section and clears the
+  original grid cells to transparency, revealing the reference if enabled.
+  Paste places the cut section using the same adjustable preview as Copy.
+  Cutting is one undo step; Undo restores the removed pixels without clearing
+  the clipboard. Cutting an already-empty selection creates no undo step.
+- Press Delete with a grid section selected to clear its pixels to transparency
+  without changing the clipboard. The removal is one undo step; deleting an
+  empty area creates no undo step. Text/form fields keep normal Delete behavior.
 - Click outside a floating line/shape/paste to finalize it, or use Apply
   placement. Clicking away on the canvas places it without starting a second
   drawing on the same click. Palette, placement settings, and zoom controls
@@ -62,8 +85,11 @@ controls stay on one row.
   resizing, cropping, and project switching finalize pending placements first.
   Autosave stores finalized paint, not editable previews; leaving with a
   preview still open triggers the unsaved-work warning.
-- Enlarge the display from 100% (fit) to 800% using just the +/- buttons
-  overlaid at the bottom-right inside the canvas window, above its scrollbars.
+- Enlarge the display from 100% (fit) to 800% using the +/- buttons
+  overlaid at the bottom-right inside the canvas window, above its scrollbars,
+  with Ctrl/Cmd + `+`/`=` and Ctrl/Cmd + `-`, or with Ctrl/Cmd + mouse wheel or a
+  trackpad pinch over the canvas (zooms toward the pointer). These replace browser
+  page zoom while a project is open.
   Scroll horizontally/vertically to reach enlarged cells; zoom out to the minimum
   to fit the view. Zoom preserves the view center and does not alter the grid, saved
   painting, undo history, or export dimensions. Opening a project resets zoom.
@@ -74,7 +100,12 @@ controls stay on one row.
 - New projects start with an empty palette (existing projects keep their colors).
   The collapsible Palette menu overlays the bottom-left inside the canvas window;
   its closed state shows the selected color. Open it to select project colors
-  or use Add color. It stays in place while the canvas scrolls; Escape closes it.
+  or use Add color. Select a swatch and use the trash button to remove it from
+  the palette without changing painted pixels. Another remaining swatch is
+  selected automatically; removing the last color leaves the palette empty.
+  Palette removals autosave and can be re-added manually or with Color sampler.
+  It stays in place while the canvas scrolls; Escape or
+  clicking/tapping outside the menu closes it.
   Palette and zoom controls are hidden until a project is loaded.
   Add up to 32 colors manually or choose Color sampler. Sampling temporarily
   hides gridlines and painted cells and shows the full-opacity reference, even
@@ -124,6 +155,20 @@ Avoid editing the same saved project in multiple tabs simultaneously.
 For model/storage tests, serve the repository locally and open
 [tests/pattern-studio.html](tests/pattern-studio.html). The tests use an isolated,
 temporary IndexedDB database and remove it afterwards.
+
+Brush strokes, line/shape/paste previews and the keyboard cursor repaint only
+the cells they touch instead of the whole canvas. Cells are drawn from a
+one-pixel-per-cell layer in a single scaled draw, and after a zoom only the
+tiles near the viewport are painted (the rest fill in as you scroll). This keeps
+painting, placing, selecting, panning and Ctrl+wheel zoom responsive on large
+(e.g. 339 x 500) grids at high zoom. To measure latency, open the editor, load
+`tests/pattern-studio-benchmark.js` from the browser console (for example by
+appending a `<script>` tag), and run
+`await patternStudioBenchmark.run({ painted: true, flush: true, moves: 60 })`
+for brush strokes, or
+`await patternStudioBenchmark.scenarios({ painted: true, flush: true, moves: 40 })`
+for line, shape, select, move and wheel-zoom timings. Both import a temporary
+benchmark project into this browser's saved projects.
 
 ## Sticky board
 

@@ -7,7 +7,7 @@
 <script type="module">
 import { parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
-import { boxFromCells, copyCells, objectCorners, rasterObject, resizeObject, shapeMask } from '../tools/pattern-studio/objects.js';
+import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth } from '../tools/pattern-studio/objects.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -65,6 +65,25 @@ try {
     assert(Math.abs(oldCorner.x - newCorner.x) < 1e-9 && Math.abs(oldCorner.y - newCorner.y) < 1e-9, 'Rotated resize anchors the opposite corner without moving it');
     assert(rasterObject({ kind: 'selection', ...box }, 10, 10, color).size === 0, 'Selection border never paints into the grid');
     assert(rasterObject({ ...rect, width: 500, height: 500, cx: 250, cy: 250, angle: 0 }, 500, 500, color).size === 250000, 'Maximum-size filled shape renders every cell');
+    const brushed = [];
+    brush(5, 5, 3, (x, y) => brushed.push(`${x},${y}`));
+    assert(brushed.length === 9 && brushed[0] === '4,4' && brushed[8] === '6,6', 'Odd brush width is centered on the cell');
+    brushed.length = 0;
+    brush(5, 5, 2, (x, y) => brushed.push(`${x},${y}`));
+    assert(brushed.join(' ') === '5,5 6,5 5,6 6,6', 'Even brush width extends right/down from the cell');
+    assert(strokeWidth('abc') === 1 && strokeWidth(0) === 1 && strokeWidth(21) === 1 && strokeWidth(7) === 7, 'Invalid stroke widths fall back to 1');
+    const thickLine = rasterObject({ ...segment, a: { x: 1, y: 5 }, b: { x: 8, y: 5 }, stroke: 3 }, 10, 10, color);
+    assert(thickLine.size === 30 && thickLine.has(41) && thickLine.has(61) && !thickLine.has(31), 'Line width 3 paints a 3-cell-thick band');
+    assert(rasterObject({ ...segment, stroke: 1 }, 10, 10, color).size === linePixels.size, 'Line width 1 matches the original line');
+    const thickRect = rasterObject({ ...rect, filled: false, width: 8, height: 8, cx: 4, cy: 4, stroke: 2 }, 10, 10, color);
+    assert(thickRect.size === 48 && thickRect.has(11) && !thickRect.has(22), 'Outline width 2 is two cells thick and keeps the interior open');
+    assert(JSON.stringify(shapeMask('ellipse', 11, 9, false, 1)) === JSON.stringify(shapeMask('ellipse', 11, 9, false)), 'Outline width defaults to 1');
+    for (const shape of ['rectangle', 'ellipse', 'triangle', 'star']) {
+        const fill = shapeMask(shape, 15, 13, true), thin = shapeMask(shape, 15, 13, false, 1), thick = shapeMask(shape, 15, 13, false, 3);
+        assert(thick.every((v, i) => !v || fill[i]) && thin.every((v, i) => !v || thick[i]) &&
+            thick.filter(Boolean).length > thin.filter(Boolean).length, `${shape} thick outline contains the thin outline inside the shape`);
+    }
+    assert(shapeMask('rectangle', 4, 4, false, 20).every(Boolean), 'Outline wider than the shape fills it without overflowing');
     for (const [text, expected] of [['50', 50], ['50.99', 50], ['4.9', 4], ['500.999', 500], ['+42.8', 42], [' 12.0 ', 12], ['49.99999999', 49], ['49.99999999999999999999', 49]]) {
         assert(parseGridSize(text) === expected, `Grid size ${text} rounds down to ${expected}`);
     }
