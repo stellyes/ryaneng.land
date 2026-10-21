@@ -284,13 +284,12 @@ document.addEventListener('pointerdown', event => {
     }
 }, true);
 
-function render() {
-    $('sample-preview').hidden = true;
-    if (!project || !largeScreen.matches) return;
+// Sizes the canvas element and workspace for the current zoom without touching the bitmap.
+function layoutCanvas() {
     const wrap = $('canvas-wrap');
     const workspace = $('workspace');
     const fit = Math.min((workspace.clientWidth - 48) / project.width, (workspace.clientHeight - 48) / project.height);
-    if (fit <= 0) return;
+    if (fit <= 0) return null;
     const width = Math.max(1, Math.floor(project.width * fit * zoom));
     const height = Math.max(1, Math.floor(project.height * fit * zoom));
     wrap.style.width = `${Math.max(workspace.clientWidth, width + 48)}px`;
@@ -299,14 +298,24 @@ function render() {
     const dpr = Math.min(devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    const bitmapWidth = Math.round(width * dpr), bitmapHeight = Math.round(height * dpr);
+    return { bitmapWidth: Math.round(width * dpr), bitmapHeight: Math.round(height * dpr) };
+}
+
+function render({ paint = true } = {}) {
+    $('sample-preview').hidden = true;
+    clearTimeout(zoomSettleTimer);
+    zoomSettleTimer = 0;
+    if (!project || !largeScreen.matches) return;
+    const size = layoutCanvas();
+    if (!size) return;
+    const { bitmapWidth, bitmapHeight } = size;
     // Reassigning canvas dimensions reallocates the bitmap, so only do it when the size changes.
     if (canvas.width !== bitmapWidth || canvas.height !== bitmapHeight) {
         canvas.width = bitmapWidth;
         canvas.height = bitmapHeight;
     }
     paintedTiles = null;
-    if (!deferTiles) paintVisibleTiles();
+    if (paint) paintVisibleTiles();
     drawnPreview = previewBounds();
     drawnCursor = cursorVisible();
     renderCrop();
@@ -316,7 +325,7 @@ function render() {
 // Only the tiles near the viewport are painted on a full render; the rest are painted as they
 // scroll into view, so zooming costs the same at 800% as at 100%.
 const TILE = 32;
-let paintedTiles = null, deferTiles = false;
+let paintedTiles = null, zoomSettleTimer = 0;
 
 function paintVisibleTiles() {
     if (!project || !canvas.width) return;
@@ -710,11 +719,19 @@ function finishPan() {
     if (workspace.hasPointerCapture(id)) workspace.releasePointerCapture(id);
 }
 
+// True when the pointer is inside the workspace's visible area, excluding its scrollbars.
+function inWorkspaceViewport(event) {
+    const workspace = $('workspace');
+    const rect = workspace.getBoundingClientRect();
+    const left = rect.left + workspace.clientLeft, top = rect.top + workspace.clientTop;
+    return event.clientX >= left && event.clientX < left + workspace.clientWidth &&
+        event.clientY >= top && event.clientY < top + workspace.clientHeight;
+}
+
 $('workspace').addEventListener('pointerdown', event => {
     if (!project || crop || tool !== 'move' || !largeScreen.matches || pan || event.button !== 0 || !event.isPrimary) return;
     const workspace = $('workspace');
-    const rect = workspace.getBoundingClientRect();
-    if (event.clientX >= rect.left + workspace.clientWidth || event.clientY >= rect.top + workspace.clientHeight) return;
+    if (!inWorkspaceViewport(event)) return;
     event.preventDefault();
     pointerFocus = true;
     canvas.focus({ preventScroll: true });
@@ -822,9 +839,11 @@ action('redo', redo);
 action('copy', () => placement.copy());
 action('cut', () => placement.cut());
 action('paste', () => placement.paste());
-document.addEventListener('pointerdown', event => {
+// Click-away finalizes a placement only inside the pixel-grid viewport. The canvas itself is handled by
+// placement.begin; scrollbars and controls outside the viewport leave it editable.
+$('workspace').addEventListener('pointerdown', event => {
     if (!placement.active || event.button !== 0 || !event.isPrimary ||
-        event.target.closest('#canvas-stage, #object-settings, #palette-menu, .zoom-bar, [data-tool], #copy, #cut, #paste, #undo, #redo')) return;
+        event.target.closest('#canvas-stage') || !inWorkspaceViewport(event)) return;
     placement.commit();
 }, true);
 document.addEventListener('keydown', event => {
@@ -857,14 +876,22 @@ function setZoom(value, anchor) {
     const centerY = (anchorY - previous.top) / previous.height;
     zoom = Math.max(1, Math.min(8, value));
     updateControls();
+    // Resize the element now and let the browser stretch the existing bitmap; reallocating and
+    // repainting it at full resolution costs far more, so that waits until zooming pauses.
+    const size = largeScreen.matches ? layoutCanvas() : null;
+    // A bitmap much larger than needed makes newly revealed tiles expensive, so shrink it right away.
+    const full = !size || canvas.width > size.bitmapWidth * 1.5;
     // Paint after the scroll is re-anchored so only the tiles that end up visible are drawn.
-    deferTiles = true;
-    try { render(); } finally { deferTiles = false; }
+    if (full) render({ paint: false });
     const next = canvas.getBoundingClientRect();
     workspace.scrollLeft += next.left + centerX * next.width - anchorX;
     workspace.scrollTop += next.top + centerY * next.height - anchorY;
     paintVisibleTiles();
+    if (full) return;
+    clearTimeout(zoomSettleTimer);
+    zoomSettleTimer = setTimeout(render, ZOOM_SETTLE_MS);
 }
+const ZOOM_SETTLE_MS = 150;
 action('zoom-in', () => setZoom(zoom + 0.25));
 action('zoom-out', () => setZoom(zoom - 0.25));
 document.addEventListener('keydown', event => {

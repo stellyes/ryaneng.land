@@ -81,7 +81,7 @@
     async function zoomTo(level) {
         while ($('zoom-out').disabled === false) $('zoom-out').click(), await wait(0);
         for (let i = 0; i < (level - 1) * 4 && !$('zoom-in').disabled; i++) { $('zoom-in').click(); await wait(10); }
-        await wait(50);
+        await wait(250);
         const workspace = $('workspace');
         workspace.scrollLeft = (workspace.scrollWidth - workspace.clientWidth) / 2;
         workspace.scrollTop = (workspace.scrollHeight - workspace.clientHeight) / 2;
@@ -194,8 +194,51 @@
             samples.push(performance.now() - start);
             await wait(0);
         }
-        await wait(50);
-        return { tool: 'zoom', ...stats(samples), bitmap: `${canvas.width}x${canvas.height}` };
+        // Zoom re-rasterizes once it pauses; report the longest main-thread stall while that happens.
+        let settle = 0, last = performance.now();
+        const end = last + 500;
+        while (last < end) {
+            await tick();
+            const now = performance.now();
+            settle = Math.max(settle, now - last);
+            last = now;
+        }
+        return { tool: 'zoom', ...stats(samples), settle: Math.round(settle * 100) / 100, bitmap: `${canvas.width}x${canvas.height}` };
+    }
+
+    // Sweeps ctrl+wheel zoom across the whole range, one wheel step per animation frame like a
+    // trackpad, and records frame intervals during the sweep and while the view settles afterwards.
+    // Frame times include GPU raster work that per-event timings miss. Needs a visible tab.
+    async function zoomSweep({ direction = 'in', settleMs = 500 } = {}) {
+        const workspace = $('workspace');
+        const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+        while (!$(direction === 'in' ? 'zoom-out' : 'zoom-in').disabled) {
+            $(direction === 'in' ? 'zoom-out' : 'zoom-in').click();
+            await wait(0);
+        }
+        await wait(300);
+        const view = workspace.getBoundingClientRect();
+        const done = () => $(direction === 'in' ? 'zoom-in' : 'zoom-out').disabled;
+        const frames = [];
+        let last = await frame();
+        while (!done()) {
+            workspace.dispatchEvent(new WheelEvent('wheel', {
+                deltaY: direction === 'in' ? -100 : 100, deltaMode: 0, ctrlKey: true, bubbles: true, cancelable: true,
+                clientX: view.left + view.width / 2, clientY: view.top + view.height / 2,
+            }));
+            const now = await frame();
+            frames.push(now - last);
+            last = now;
+        }
+        const settle = [];
+        const end = last + settleMs;
+        while (last < end) {
+            const now = await frame();
+            settle.push(now - last);
+            last = now;
+        }
+        const round = value => Math.round(value * 100) / 100;
+        return { tool: `zoom-sweep-${direction}`, ...stats(frames), settleMax: round(Math.max(...settle)) };
     }
 
     async function scenarios({ painted = true, zoom = 8, moves = 60, flush = true } = {}) {
@@ -213,5 +256,5 @@
         return { painted, zoom, flush, dpr: devicePixelRatio, results };
     }
 
-    window.patternStudioBenchmark = { run, load, zoomTo, stroke, drag, wheelZoom, scenarios };
+    window.patternStudioBenchmark = { run, load, zoomTo, stroke, drag, wheelZoom, zoomSweep, scenarios };
 })();
