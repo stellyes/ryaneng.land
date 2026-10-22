@@ -21,9 +21,29 @@ controls stay on one row.
   is visible at a time: choosing Grid, Crop, or a drawing/selection tool replaces
   the previous panel. The panel scrolls internally when needed and stays put
   while zooming or panning, without resizing the canvas viewport.
+- The start screen lists saved projects in a scrollable menu below the intro,
+  with **Create new** (pick a reference image) at the top and projects newest
+  first. Each row's background is the project preview (painted cells over a
+  faded reference) scaled to the row width without stretching, showing the
+  horizontal slice with the most painted cells. Click a row to open it; its ⋮
+  menu offers Download and Delete. Try a sample and Import project backup are
+  below the list.
 - The top-right File dropdown contains Projects, Download project, and Export
-  pattern. Selecting an action, clicking/tapping outside, or pressing Escape
-  closes the dropdown. Download/export remain unavailable without a project.
+  pattern. It is hidden until a project is open. Selecting an action,
+  clicking/tapping outside, or pressing Escape closes the dropdown.
+- The Canvas dropdown beside File edits the whole pattern; each change is one
+  undo step:
+  - Add column left/right and Add row above/below add one blank line of cells.
+    Add multiple columns/rows opens a small dialog for a count and side. Grids
+    are limited to 500 cells per side.
+  - Mirror horizontal flips left-right across the central vertical axis; Mirror
+    vertical flips top-bottom. An odd center column/row stays in place.
+  - Rotate right/left turns the pattern 90 degrees.
+  - Adding cells never resamples or moves the reference image: new cells sit
+    on blank white board space beyond it, so the original work and the
+    reference's aspect ratio are preserved. Mirror and rotate flip or turn the
+    reference's exact pixels along with the grid. Cropping a padded board
+    bakes any blank space inside the crop into the new reference.
 - Paint by click, stylus, or drag, use connected four-neighbor bucket fill,
   or erase individual cells. Arrow keys and Space
   provide keyboard painting. Undo/redo includes strokes, fills, and grid resizing.
@@ -165,3 +185,63 @@ for line, shape, select, move and wheel-zoom timings.
 `await patternStudioBenchmark.zoomSweep({ direction: 'in' })` reports per-frame
 times for a full Ctrl+wheel zoom sweep (keep the tab visible). These import a temporary
 benchmark project into this browser's saved projects.
+
+## Product-line color matching
+
+[palette.js](palette.js) exports `findClosestColor(inputColor, palette)` for
+future palette-tool integration. Pass a six-digit sRGB hex color and an array
+from [yarn-palettes.json](yarn-palettes.json):
+
+```js
+import { findClosestColor } from './palette.js';
+
+const closest = findClosestColor('#d1ccc8', palettes["Aunt Lydia's Baby Shower"]);
+// '#d0cbc7'
+```
+
+The matcher converts sRGB to Oklab and chooses the smallest Euclidean distance
+to approximate visual similarity, rather than comparing raw RGB channels.
+It returns the original palette entry; ties keep the first entry in list order.
+Inputs are case-insensitive `#rrggbb` strings. An empty/missing palette or any
+invalid color throws an explicit error, including invalid entries after an
+exact match. Neither the palette nor the current painting is modified.
+Screen colors are approximations, not a guarantee of a physical yarn match.
+
+## Yarn match
+
+The **Yarn** menu beside Palette previews the pattern in one of the 827 yarn
+lines from [yarn-palettes.json](yarn-palettes.json) (loaded on first open). It
+is view-only: project cells, the palette and saved data keep their original
+colors, and Paint still uses the original color you select. Palette swatches
+show the original color (upper left) and its yarn (lower right) while
+previewing, and a table lists each color's yarn and score. Choose
+**Original colors** to return. Opening a project resets the preview.
+
+The menu ranks every line for the current project and shows the top five. A
+line's score works like this:
+
+- **Per-color score.** Each color gets `100 * max(0, 1 - d / 0.3)`, where `d`
+  is the Oklab distance to its yarn. This replaces a plain RGB percentage,
+  which overstates some differences and understates others. Roughly, 0.02 is
+  barely noticeable (93), 0.05 a close substitute (83), and 0.1 clearly
+  different (67).
+- **One yarn per color.** Colors are matched one-to-one to different yarns,
+  closest pairs first. Two pattern colors therefore can't both "match" the same
+  yarn and become indistinguishable. A line with fewer yarns than your pattern
+  has colors leaves the extras without a yarn (score 0). This is what keeps a
+  4-color line from being recommended for a 12-color pattern.
+- **Near-duplicates share.** Colors closer than 0.04 (nearly identical on
+  screen) share one yarn instead of competing for two.
+- **Coverage weighting.** The line score is a weighted average: half of each
+  color's weight is equal across colors and half follows how many cells use it.
+  A poor match for a background color therefore costs more than one for a few
+  accent pixels, but rarely used colors still count. Unpainted palette colors
+  are included.
+- **Usable colors.** A color is usable when its own yarn scores 70 or more.
+  Ties are broken by more usable colors, then larger lines.
+
+Export can optionally render the previewed yarn colors (**Use previewed yarn
+colors** in the export dialog); otherwise it uses the original colors. The
+scoring functions (`colorUsage`, `prepareYarnLines`, `matchYarnLine`,
+`rankYarnLines`) live in [palette.js](palette.js). Ranking all lines takes
+about 30 ms for 16 colors and about 125 ms for the 32-color maximum.

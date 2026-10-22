@@ -18,7 +18,24 @@
       <div><a class="back" href="../../code.html">&larr; Back to Code</a><h1>Pattern Studio</h1></div>
           <p id="message" role="status" aria-live="polite"></p>
 
-      <details id="file-menu">
+      <details id="canvas-menu" hidden>
+        <summary id="canvas-toggle">Canvas</summary>
+        <div class="canvas-actions" role="group" aria-label="Canvas edits">
+          <button id="add-col-left" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>Add column left</button>
+          <button id="add-col-right" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3 5 5-5 5"/></svg>Add column right</button>
+          <button id="add-cols" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12"/></svg>Add multiple columns&hellip;</button>
+          <hr>
+          <button id="add-row-above" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 10 5-5 5 5"/></svg>Add row above</button>
+          <button id="add-row-below" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5"/></svg>Add row below</button>
+          <button id="add-rows" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12"/></svg>Add multiple rows&hellip;</button>
+          <hr>
+          <button id="mirror-horizontal" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 8h14M4 5 1 8l3 3m8-6 3 3-3 3"/></svg>Mirror horizontal</button>
+          <button id="mirror-vertical" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v14M5 4l3-3 3 3m-6 8 3 3 3-3"/></svg>Mirror vertical</button>
+          <button id="rotate-right" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 8a5 5 0 1 1-1.5-3.5M13 2v3h-3"/></svg>Rotate right</button>
+          <button id="rotate-left" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8a5 5 0 1 0 1.5-3.5M3 2v3h3"/></svg>Rotate left</button>
+        </div>
+      </details>
+      <details id="file-menu" hidden>
         <summary id="file-toggle">File</summary>
         <div class="file-actions">
         <button id="projects" type="button">Projects</button>
@@ -150,9 +167,21 @@
         <p class="eyebrow">FROM IMAGE TO STITCH</p>
         <h2>Make something, one pixel at a time.</h2>
         <p>Bring a reference. Pick your threads. Paint your own pattern.</p>
+        <section class="recent-projects" aria-labelledby="recent-title">
+          <h3 id="recent-title" class="eyebrow">Your projects</h3>
+          <ul id="recent-list" class="project-rows">
+            <li class="home-row create-row">
+              <button id="upload" class="row-open" type="button" aria-label="Create new project from a reference image">
+                <svg class="row-icon" viewBox="0 0 7 7" aria-hidden="true" shape-rendering="crispEdges"><path d="M3 1h1v2h2v1H4v2H3V4H1V3h2z"/></svg>
+                <span class="row-text"><span class="row-name">Create new</span><span class="row-meta">Start from a reference image</span></span>
+              </button>
+            </li>
+          </ul>
+          <p id="recent-status" class="fine" role="status" aria-live="polite"></p>
+        </section>
         <div class="welcome-actions">
-          <button id="upload" class="primary">Choose reference image</button>
           <button id="demo">Try a sample</button>
+          <button id="home-import">Import project backup</button>
         </div>
         <p class="fine">PNG, JPEG, WebP or GIF &middot; up to 20 MB<br>Reference resized to a maximum of 500 pixels. Nothing is uploaded.</p>
       </div>
@@ -185,6 +214,7 @@
       </div>
     </section>
     <div id="workspace-controls" class="workspace-controls" hidden>
+    <div class="workspace-menus">
     <details id="palette-menu">
       <summary id="palette-toggle">Palette <span id="palette-current" aria-hidden="true"></span><span id="palette-current-label" class="visually-hidden">No color selected</span></summary>
       <section class="palette-panel" aria-label="Color palette">
@@ -201,6 +231,26 @@
         </div>
       </section>
     </details>
+    <details id="yarn-menu">
+      <summary id="yarn-toggle">Yarn <span id="yarn-current">Original colors</span></summary>
+      <section class="palette-panel yarn-panel" aria-label="Yarn match">
+        <strong>Yarn match</strong>
+        <p class="fine">Preview your pattern in a yarn line's colors. Your project colors are never changed.</p>
+        <label class="yarn-select">Preview yarn line
+          <select id="yarn-line"><option value="">Original colors</option></select>
+        </label>
+        <div>
+          <strong class="yarn-heading">Top matches</strong>
+          <p id="yarn-status" class="fine" role="status" aria-live="polite"></p>
+          <ol id="yarn-ranking"></ol>
+        </div>
+        <div id="yarn-mapping-section" hidden>
+          <strong class="yarn-heading">Your colors &rarr; yarn</strong>
+          <ul id="yarn-mapping"></ul>
+        </div>
+      </section>
+    </details>
+    </div>
     <section class="zoom-bar" aria-label="Display zoom">
       <span>Zoom Controls</span>
       <button id="zoom-out" aria-label="Zoom out" aria-describedby="zoom-help" title="Zoom out (Ctrl/Cmd+-)" disabled>&minus;</button>
@@ -222,12 +272,22 @@
     <p class="dialog-message" role="status" aria-live="polite"></p>
     <p class="fine">No accounts, AWS, analytics, or cloud image storage. This demo does not send your images anywhere.</p>
   </dialog>
+  <dialog id="extend-dialog" aria-labelledby="extend-title">
+    <div class="dialog-heading"><h2 id="extend-title">Add columns</h2><button data-close="extend-dialog">Close</button></div>
+    <p>New cells start blank. The reference image gets matching blank space so it stays lined up with the grid.</p>
+    <label>Number to add <input id="extend-count" type="number" min="1" step="1" value="1" inputmode="numeric"></label>
+    <label>Add to <select id="extend-side"></select></label>
+    <p id="extend-limit" class="fine"></p>
+    <button id="extend-apply" class="primary">Add columns</button>
+    <p class="dialog-message" role="alert"></p>
+  </dialog>
   <dialog id="export-dialog" aria-labelledby="export-title">
     <div class="dialog-heading"><h2 id="export-title">Export your pattern</h2><button data-close="export-dialog">Close</button></div>
     <p>Only your painted cells. No reference image, no gridlines.</p>
     <label>Format <select id="format"><option value="png">PNG</option><option value="webp">WebP</option><option value="jpeg">JPG</option></select></label>
     <label>Pixels per cell <select id="export-scale"><option value="1">1 (pixel art)</option><option value="10" selected>10</option><option value="20">20</option></select></label>
     <label>Background for JPG <input id="export-background" type="color" value="#ffffff"></label>
+    <label class="check export-yarn" id="export-yarn-label" hidden><input id="export-yarn" type="checkbox"> Use previewed yarn colors (<span id="export-yarn-name"></span>)</label>
     <p class="fine">PNG and WebP keep unpainted cells transparent. JPG uses the chosen background. Exports are limited to a 5,000px longest edge.</p>
     <button id="download-image" class="primary">Download image</button>
     <p class="dialog-message" role="status" aria-live="polite"></p>

@@ -5,8 +5,9 @@
 <h1>Pattern Studio model and storage tests</h1>
 <pre id="results">Running...</pre>
 <script type="module">
-import { parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
+import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
+import { ZERO_SCORE_DISTANCE, colorDistance, colorUsage, findClosestColor, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
 import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth } from '../tools/pattern-studio/objects.js';
 const results = [];
 const assert = (condition, name) => {
@@ -21,6 +22,48 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    const yarnColors = Object.freeze(['#f9f9f9', '#d0cbc7', '#b6acb4', '#fed6d5']);
+    assert(findClosestColor('#d0cbc7', yarnColors) === '#d0cbc7', 'Palette matcher returns an exact match');
+    assert(findClosestColor('#D0CBC7', yarnColors) === '#d0cbc7', 'Palette matcher accepts uppercase input');
+    assert(findClosestColor('#ffffff', yarnColors) === '#f9f9f9', 'Palette matcher finds the closest light yarn color');
+    assert(findClosestColor('#ffffff', ['#123ABC']) === '#123ABC', 'Single-color palette returns the original entry unchanged');
+    assert(findClosestColor('#123abc', ['#123ABC', '#123abc']) === '#123ABC', 'Equal palette distances keep the first entry');
+    assert(findClosestColor('#808080', ['#000000', '#ffffff']) === '#ffffff', 'Palette matcher uses perceptual rather than raw RGB distance');
+    for (const invalid of ['red', '#fff', '#12345678', '#gggggg', '', null, 123456]) {
+        rejects(() => findClosestColor(invalid, yarnColors), `Palette matcher rejects invalid input ${JSON.stringify(invalid)}`);
+        rejects(() => findClosestColor('#123456', ['#123456', invalid]), `Palette matcher validates entries even after an exact match: ${JSON.stringify(invalid)}`);
+    }
+    for (const invalid of [[], null, {}, '#ffffff', new Array(1)]) {
+        rejects(() => findClosestColor('#123456', invalid), `Palette matcher rejects invalid palette ${JSON.stringify(invalid)}`);
+    }
+    assert(matchScore(0) === 100 && matchScore(ZERO_SCORE_DISTANCE) === 0 && matchScore(1) === 0, 'Match score runs from 100 (exact) to 0 (far)');
+    assert(colorDistance('#808080', '#808080') === 0 && colorDistance('#000000', '#ffffff') > 0.99, 'Color distance is perceptual Oklab distance');
+    const usage = colorUsage(['#FF0000', '#ff0000', null, '#0000ff'], ['#00ff00', '#ff0000']);
+    assert(usage.length === 3 && usage.find(item => item.color === '#ff0000').count === 2 && usage.find(item => item.color === '#00ff00').count === 0,
+        'Color usage counts painted cells case-insensitively and includes unused palette colors');
+    const lines = prepareYarnLines({
+        Tiny: ['#ff0000'],
+        Exact: ['#ff0000', '#00ff00', '#0000ff', '#ffffff'],
+        Close: ['#f00505', '#05f005', '#0505f0'],
+    });
+    assert(lines[0].labs instanceof Float64Array && lines[0].labs.length === 3, 'Yarn lines cache Oklab values');
+    const rgb = colorUsage(['#ff0000', '#00ff00', '#0000ff'], []);
+    const exact = matchYarnLine(rgb, lines[1]);
+    assert(Math.round(exact.score) === 100 && exact.usable === 3 && exact.total === 3, 'An exact line scores 100 with every color usable');
+    const tiny = matchYarnLine(rgb, lines[0]);
+    assert(tiny.usable === 1 && tiny.score < 40 && [...tiny.mapping.values()].filter(match => match.shared).length === 2,
+        'A line with too few yarns cannot reuse one yarn for distinct colors');
+    const ranked = rankYarnLines(rgb, lines, 2);
+    assert(ranked.length === 2 && ranked[0].name === 'Exact' && ranked[1].name === 'Close', 'Ranking orders lines by score and honors the limit');
+    const nearTwins = matchYarnLine(colorUsage(['#ff0000', '#fe0101'], []), lines[0]);
+    assert(nearTwins.usable === 2 && nearTwins.mapping.get('#fe0101').yarn === '#ff0000', 'Near-identical project colors share one yarn');
+    const weighted = matchYarnLine(colorUsage(['#ff0000', '#ff0000', '#ff0000', '#ff0000', '#00ff00'], []), prepareYarnLines({ Red: ['#ff0000', '#000000'] })[0]);
+    const unweighted = matchYarnLine(colorUsage(['#ff0000', '#00ff00'], []), prepareYarnLines({ Red: ['#ff0000', '#000000'] })[0]);
+    assert(weighted.score > unweighted.score, 'Colors covering more of the pattern weigh more in the score');
+    assert(rankYarnLines([], lines).length === 0 && matchYarnLine([], lines[0]).score === 0, 'An empty project has no recommendations');
+    for (const invalid of [null, [], { Bad: [] }, { Bad: ['red'] }]) {
+        rejects(() => prepareYarnLines(invalid), `Yarn catalog rejects ${JSON.stringify(invalid)}`);
+    }
     const color = '#123456';
     const box = boxFromCells({ x: 7, y: 8 }, { x: 3, y: 2 });
     assert(box.width === 5 && box.height === 7 && box.cx === 5.5 && box.cy === 5.5, 'Object drag includes start/end cells in either direction');
@@ -141,6 +184,38 @@ try {
     assert(reverse.length === 9 && reverse[8].join() === '0,0', 'Reverse vertical swipe interpolation');
     const resized = resizeCells(['#000000', null, null, '#ffffff'], 2, 2, 4, 4);
     assert(resized[0] === '#000000' && resized[3] === null && resized[15] === '#ffffff', 'Grid resizing preserves paint and transparent cells');
+    // 3 x 2 grid: a b c / d e f
+    const abc = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const wider = extendCells(abc, 3, 2, { left: 1, right: 2 });
+    assert(wider.cols === 6 && wider.rows === 2 && wider.cells.join() === ',a,b,c,,,,d,e,f,,', 'Adding columns pads blank cells on the chosen sides');
+    const taller = extendCells(abc, 3, 2, { top: 1, bottom: 1 });
+    assert(taller.cols === 3 && taller.rows === 4 && taller.cells.join() === ',,,a,b,c,d,e,f,,,', 'Adding rows pads blank cells above and below');
+    assert(mirrorCells(abc, 3, 2, 'horizontal').join() === 'c,b,a,f,e,d', 'Horizontal mirror flips left-right and keeps the odd center column');
+    assert(mirrorCells(abc, 3, 2, 'vertical').join() === 'd,e,f,a,b,c', 'Vertical mirror flips top-bottom');
+    assert(mirrorCells(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'], 3, 3, 'vertical').slice(3, 6).join() === 'd,e,f', 'Vertical mirror keeps the odd center row');
+    const right = rotateCells(abc, 3, 2, true);
+    assert(right.cols === 2 && right.rows === 3 && right.cells.join() === 'd,a,e,b,f,c', 'Rotate right turns the grid clockwise');
+    const left = rotateCells(abc, 3, 2, false);
+    assert(left.cols === 2 && left.rows === 3 && left.cells.join() === 'c,f,b,e,a,d', 'Rotate left turns the grid counter-clockwise');
+    assert(rotateCells(right.cells, 2, 3, false).cells.join() === abc.join(), 'Rotating right then left restores the grid');
+    const board = { width: 240, height: 180, cols: 50, rows: 38, referenceRect: null };
+    const padded = extendBoard(board, { left: 2, right: 1, top: 1 });
+    assert(Math.abs(padded.width - 240 * 53 / 50) < 1e-6 && Math.abs(padded.height - 180 * 39 / 38) < 1e-6,
+        'Adding cells grows the board by whole cells at the same cell size');
+    assert(padded.referenceRect.width === 240 && padded.referenceRect.height === 180 &&
+        Math.abs(padded.referenceRect.x - 9.6) < 1e-6 && Math.abs(padded.referenceRect.y - 180 / 38) < 1e-6,
+        'Adding cells keeps the reference size and shifts it with the original cells');
+    const paddedBoard = { ...board, ...padded, cols: 53, rows: 39 };
+    const flipped = mirrorBoard(paddedBoard, 'horizontal').referenceRect;
+    assert(Math.abs(flipped.x - (paddedBoard.width - 9.6 - 240)) < 1e-6 && flipped.y === padded.referenceRect.y, 'Mirroring moves the reference to the mirrored side');
+    assert(mirrorBoard(board, 'vertical').referenceRect === null, 'Mirroring an unpadded board keeps the reference full-board');
+    const turnedBoard = rotateBoard(paddedBoard, true);
+    assert(turnedBoard.width === paddedBoard.height && turnedBoard.referenceRect.width === 180 && turnedBoard.referenceRect.height === 240 &&
+        Math.abs(turnedBoard.referenceRect.y - 9.6) < 1e-6, 'Rotating swaps the board and reference sizes');
+    const back = rotateBoard({ ...paddedBoard, ...turnedBoard }, false).referenceRect;
+    assert(Math.abs(back.x - padded.referenceRect.x) < 1e-6 && Math.abs(back.y - padded.referenceRect.y) < 1e-6,
+        'Rotating right then left restores the reference position');
+    assert(referenceRect(board).width === 240 && referenceRect(paddedBoard).x === padded.referenceRect.x, 'Reference rect defaults to the full board');
     const record = {
         version: 1, id: 'test-project', name: 'Test', width: 2, height: 2, cols: 2, rows: 2,
         palette: ['#000000'], cells: ['#000000', null, null, null],
@@ -156,6 +231,11 @@ try {
     rejects(() => validateProject({ ...record, palette: ['red'] }), 'Invalid palette colors rejected');
     rejects(() => validateProject({ ...record, width: 2, height: 1 }), 'Mismatched grid proportions rejected');
     rejects(() => validateProject({ ...record, version: 2 }), 'Unknown project version rejected');
+    const paddedRecord = { ...record, width: 3, height: 2, cols: 3, rows: 2, cells: Array(6).fill(null), referenceRect: { x: 1, y: 0, width: 2, height: 2 } };
+    assert(validateProject(paddedRecord) === paddedRecord, 'Padded boards with a placed reference accepted');
+    assert(validateProject({ ...paddedRecord, width: 2.4, referenceRect: { x: 0.4, y: 0, width: 2, height: 2 } }), 'Fractional padded boards accepted');
+    rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 2, y: 0, width: 2, height: 2 } }), 'Reference outside the board rejected');
+    rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 0, y: 0, width: 1.5, height: 2 } }), 'Non-integer reference size rejected');
     store = await openStore(database);
     await store.run('readwrite', table => table.put(record));
     const saved = await store.run('readonly', table => table.get(record.id));

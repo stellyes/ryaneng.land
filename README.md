@@ -12,5 +12,5 @@ For the blog. I'm using pagedown (https://github.com/StackExchange/pagedown). Sa
 
 ## Cool things
 
-- [Pattern Studio](https://ryaneng.land/tools/pattern-studio/index.html): local pixel-art / tapestry crochet pattern editor.
+- [Pattern Studio](https://ryaneng.land/tools/pattern-studio/index.html): local tapestry crochet pattern editor.
 - [Sticky board](https://ryaneng.land/code/sticky-board.html): shared sticky-note board with an AWS serverless backend.

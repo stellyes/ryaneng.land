@@ -38,6 +38,77 @@ export function cropCells(project, rect, cols, rows) {
     });
 }
 
+// Adds blank (null) cells around the grid; each side is a count of whole columns or rows.
+export function extendCells(cells, cols, rows, { left = 0, right = 0, top = 0, bottom = 0 }) {
+    const nextCols = cols + left + right, nextRows = rows + top + bottom;
+    const next = new Array(nextCols * nextRows).fill(null);
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) next[(y + top) * nextCols + x + left] = cells[y * cols + x];
+    }
+    return { cells: next, cols: nextCols, rows: nextRows };
+}
+
+// 'horizontal' flips left-right across the central vertical axis; 'vertical' flips top-bottom.
+// With an odd count, the center column or row maps onto itself.
+export function mirrorCells(cells, cols, rows, axis) {
+    return cells.map((_, index) => {
+        const x = index % cols, y = (index - x) / cols;
+        return axis === 'horizontal' ? cells[y * cols + cols - 1 - x] : cells[(rows - 1 - y) * cols + x];
+    });
+}
+
+// Rotates 90 degrees; the result has the column and row counts swapped.
+export function rotateCells(cells, cols, rows, clockwise) {
+    const next = new Array(cells.length);
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const nx = clockwise ? rows - 1 - y : y, ny = clockwise ? x : cols - 1 - x;
+            next[ny * rows + nx] = cells[y * cols + x];
+        }
+    }
+    return { cells: next, cols: rows, rows: cols };
+}
+
+// The board is the grid's extent in reference-pixel units (project.width x project.height).
+// Normally the reference fills it; after rows/columns are added, project.referenceRect says
+// where the unscaled reference sits, and the rest of the board is blank.
+export function referenceRect(project) {
+    return project.referenceRect || { x: 0, y: 0, width: project.width, height: project.height };
+}
+
+const tidy = value => Math.round(value * 1e6) / 1e6;
+
+// Grows the board by whole cells; the reference keeps its pixels and shifts with the old cells.
+export function extendBoard(project, { left = 0, right = 0, top = 0, bottom = 0 }) {
+    const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
+    const rect = referenceRect(project);
+    return {
+        width: tidy(project.width + cellWidth * (left + right)),
+        height: tidy(project.height + cellHeight * (top + bottom)),
+        referenceRect: { ...rect, x: tidy(rect.x + cellWidth * left), y: tidy(rect.y + cellHeight * top) },
+    };
+}
+
+export function mirrorBoard(project, axis) {
+    if (!project.referenceRect) return { referenceRect: null };
+    const rect = project.referenceRect;
+    return {
+        referenceRect: axis === 'horizontal'
+            ? { ...rect, x: tidy(project.width - rect.x - rect.width) }
+            : { ...rect, y: tidy(project.height - rect.y - rect.height) },
+    };
+}
+
+export function rotateBoard(project, clockwise) {
+    const rect = project.referenceRect;
+    return {
+        width: project.height, height: project.width,
+        referenceRect: rect && (clockwise
+            ? { x: tidy(project.height - rect.y - rect.height), y: rect.x, width: rect.height, height: rect.width }
+            : { x: rect.y, y: tidy(project.width - rect.x - rect.width), width: rect.height, height: rect.width }),
+    };
+}
+
 export function flood(cells, cols, rows, x, y, color) {
     const start = y * cols + x;
     const target = cells[start];
@@ -76,9 +147,16 @@ export function line(x0, y0, x1, y1, visit) {
 
 export function validateProject(data) {
     const hex = /^#[0-9a-f]{6}$/i;
-    if (!data || data.version !== 1 || typeof data.name !== 'string' || !data.name.trim() || data.name.length > 80 ||
-        !Number.isInteger(data.width) || !Number.isInteger(data.height) ||
-        data.width < 1 || data.height < 1 || Math.max(data.width, data.height) > MAX_SIDE ||
+    const rect = data?.referenceRect;
+    const fits = (value, max) => Number.isFinite(value) && value > 0 && value <= max;
+    // A padded board may have fractional edges; the reference itself is always whole pixels.
+    const boardValid = rect == null
+        ? Number.isInteger(data?.width) && Number.isInteger(data?.height) && fits(data.width, MAX_SIDE) && fits(data.height, MAX_SIDE)
+        : fits(data.width, MAX_SIDE * MAX_SIDE) && fits(data.height, MAX_SIDE * MAX_SIDE) &&
+          typeof rect === 'object' && Number.isInteger(rect.width) && Number.isInteger(rect.height) &&
+          fits(rect.width, MAX_SIDE) && fits(rect.height, MAX_SIDE) && Number.isFinite(rect.x) && Number.isFinite(rect.y) &&
+          rect.x >= -0.001 && rect.y >= -0.001 && rect.x + rect.width <= data.width + 0.001 && rect.y + rect.height <= data.height + 0.001;
+    if (!data || data.version !== 1 || typeof data.name !== 'string' || !data.name.trim() || data.name.length > 80 || !boardValid ||
         !Number.isInteger(data.cols) || !Number.isInteger(data.rows) ||
         data.cols < 1 || data.rows < 1 || Math.max(data.cols, data.rows) > MAX_SIDE ||
         !Array.isArray(data.palette) || data.palette.length > 32 ||
@@ -89,8 +167,9 @@ export function validateProject(data) {
         data.reference.length > 3000000) {
         throw new Error('Invalid project backup. Choose a Pattern Studio project JSON file.');
     }
+    // Only an unpadded board must match the reference proportions exactly.
     const expected = gridDimensions(data.width, data.height, Math.max(data.cols, data.rows));
-    if (expected.cols !== data.cols || expected.rows !== data.rows) {
+    if (rect == null && (expected.cols !== data.cols || expected.rows !== data.rows)) {
         throw new Error('The project grid does not match its reference proportions.');
     }
     return data;

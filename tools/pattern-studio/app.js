@@ -1,7 +1,8 @@
-import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, flood, line, validateProject, openStore } from './model.js';
+import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from './model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, strokeWidth } from './objects.js';
+import { USABLE_SCORE, colorUsage, findClosestColor, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -68,17 +69,19 @@ function action(id, handler) {
         if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'delete-color', 'copy', 'cut', 'paste'].includes(id)) placement.commit();
     }).then(handler).catch(report));
 }
-$('file-menu').addEventListener('click', event => {
-    if (event.target.closest('.file-actions button')) $('file-menu').open = false;
-});
-$('file-menu').addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        $('file-menu').open = false;
-        $('file-toggle').focus({ preventScroll: true });
-    }
-});
+for (const [menuId, toggleId, actionsClass] of [['file-menu', 'file-toggle', 'file-actions'], ['canvas-menu', 'canvas-toggle', 'canvas-actions']]) {
+    $(menuId).addEventListener('click', event => {
+        if (event.target.closest(`.${actionsClass} button`)) $(menuId).open = false;
+    });
+    $(menuId).addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            $(menuId).open = false;
+            $(toggleId).focus({ preventScroll: true });
+        }
+    });
+}
 
 const storeReady = openStore().then(value => { store = value; }).catch(error => {
     storageError = error;
@@ -89,17 +92,19 @@ const storeReady = openStore().then(value => { store = value; }).catch(error => 
 function snapshot() {
     return {
         cols: project.cols, rows: project.rows, cells: project.cells.slice(),
-        width: project.width, height: project.height, reference: project.reference, referenceImage: reference,
+        width: project.width, height: project.height, referenceRect: project.referenceRect ?? null,
+        reference: project.reference, referenceImage: reference,
     };
 }
 
 function prepareSampler() {
-    sampleCanvas.width = project.width;
-    sampleCanvas.height = project.height;
-    // Sample the full-opacity reference, with transparency displayed over white.
+    sampleCanvas.width = Math.ceil(project.width);
+    sampleCanvas.height = Math.ceil(project.height);
+    // Sample the full-opacity reference, with transparency and blank board space displayed over white.
     sampleContext.fillStyle = '#ffffff';
-    sampleContext.fillRect(0, 0, project.width, project.height);
-    sampleContext.drawImage(reference, 0, 0);
+    sampleContext.fillRect(0, 0, sampleCanvas.width, sampleCanvas.height);
+    const rect = referenceRect(project);
+    sampleContext.drawImage(reference, rect.x, rect.y);
 }
 
 function restoreSnapshot(saved) {
@@ -203,6 +208,14 @@ function setStrokeWidth(value) {
 function updateControls() {
     const active = Boolean(project);
     $('workspace-controls').hidden = !active;
+    // File actions all need an open project; the start screen offers projects and import instead.
+    $('file-menu').hidden = $('canvas-menu').hidden = !active;
+    if (!active) $('file-menu').open = $('canvas-menu').open = false;
+    document.querySelectorAll('.canvas-actions button').forEach(button => { button.disabled = !active || Boolean(crop); });
+    if (active) {
+        for (const id of ['add-col-left', 'add-col-right', 'add-cols']) $(id).disabled ||= project.cols >= MAX_SIDE;
+        for (const id of ['add-row-above', 'add-row-below', 'add-rows']) $(id).disabled ||= project.rows >= MAX_SIDE;
+    }
     for (const id of ['name', 'backup', 'export', 'grid-toggle', 'crop-start', 'reference-toggle', 'lines-toggle']) $(id).disabled = !active || Boolean(crop);
     $('projects').disabled = Boolean(crop);
     document.querySelectorAll('[data-tool]').forEach(button => { button.disabled = !active || Boolean(crop); });
@@ -232,7 +245,8 @@ function updateControls() {
     $('zoom-out').disabled = !active || zoom <= 1;
     $('zoom-in').disabled = !active || zoom >= 8;
     if (active) {
-        $('dimensions').textContent = `${project.cols} x ${project.rows} cells | Reference ${project.width} x ${project.height}px`;
+        const rect = referenceRect(project);
+        $('dimensions').textContent = `${project.cols} x ${project.rows} cells | Reference ${rect.width} x ${rect.height}px`;
         $('grid-size').value = Math.max(project.cols, project.rows);
         $('grid-number').value = $('grid-size').value;
     }
@@ -246,7 +260,10 @@ function renderPalette() {
         const button = document.createElement('button');
         button.className = 'swatch';
         button.style.backgroundColor = color;
-        button.setAttribute('aria-label', `Paint with ${color}`);
+        const yarn = yarnLine ? displayColor(color) : null;
+        // While previewing, the lower-right half shows the yarn this color will render as.
+        if (yarn) button.style.backgroundImage = `linear-gradient(135deg, ${color} 50%, ${yarn} 50%)`;
+        button.setAttribute('aria-label', yarn ? `Paint with ${color}, previewed as yarn ${yarn}` : `Paint with ${color}`);
         button.title = color;
         button.setAttribute('aria-pressed', String(color === selected));
         button.addEventListener('click', () => {
@@ -267,6 +284,10 @@ function renderPalette() {
     $('add-color').disabled = !project || Boolean(crop);
     $('new-color').disabled = !project || Boolean(crop);
     $('delete-color').disabled = !project || Boolean(crop) || !selected;
+    if (yarnLine && project && yarnPaletteKey !== project.palette.join()) {
+        refreshYarnMapping();
+        renderPalette();
+    }
 }
 
 $('palette-menu').addEventListener('keydown', event => {
@@ -278,11 +299,198 @@ $('palette-menu').addEventListener('keydown', event => {
     }
 });
 document.addEventListener('pointerdown', event => {
-    for (const id of ['palette-menu', 'file-menu']) {
+    for (const id of ['palette-menu', 'file-menu', 'canvas-menu', 'yarn-menu']) {
         const menu = $(id);
         if (menu.open && !menu.contains(event.target)) menu.open = false;
     }
 }, true);
+
+// Yarn preview: a view-only recoloring of the pattern in one yarn line. Project colors never change.
+let yarnLines = null, yarnLoading = null, yarnLine = null, yarnMatch = null, yarnMap = new Map(), yarnPaletteKey = '';
+
+function displayColor(color) {
+    if (!yarnLine) return color;
+    let yarn = yarnMap.get(color);
+    if (yarn === undefined) {
+        // Colors outside the current match (e.g. painted since it was computed) use their nearest yarn.
+        try { yarn = findClosestColor(color, yarnLine.colors); } catch { yarn = color; }
+        yarnMap.set(color, yarn);
+    }
+    return yarn;
+}
+
+function refreshYarnMapping() {
+    if (!yarnLine || !project) return;
+    const previous = yarnMap;
+    yarnMatch = matchYarnLine(colorUsage(project.cells, project.palette), yarnLine);
+    yarnMap = new Map();
+    for (const [color, match] of yarnMatch.mapping) yarnMap.set(color, match.yarn);
+    // The match is keyed by lowercase hex; also key the project's own spelling for fast lookups.
+    for (const color of [...project.palette, ...previous.keys()]) {
+        if (!yarnMap.has(color) && yarnMap.has(color.toLowerCase())) yarnMap.set(color, yarnMap.get(color.toLowerCase()));
+    }
+    yarnPaletteKey = project.palette.join();
+    // Adding a color can reassign other colors' yarns, so repaint whenever anything moved.
+    if (previous.size !== yarnMap.size || [...yarnMap].some(([color, yarn]) => previous.get(color) !== yarn)) {
+        paintedTiles = null;
+        render();
+    }
+    renderYarnMapping();
+}
+
+function loadYarnLines() {
+    yarnLoading ||= fetch('./yarn-palettes.json')
+        .then(response => {
+            if (!response.ok) throw new Error(`The yarn catalog could not be loaded (${response.status}).`);
+            return response.json();
+        })
+        .then(data => {
+            yarnLines = prepareYarnLines(data).sort((a, b) => a.name.localeCompare(b.name));
+            const group = document.createElement('optgroup');
+            group.label = `All yarn lines (${yarnLines.length})`;
+            group.append(...yarnLines.map(line => new Option(`${line.name} (${line.colors.length})`, line.name)));
+            $('yarn-line').append(group);
+            return yarnLines;
+        })
+        .catch(error => { yarnLoading = null; throw error; });
+    return yarnLoading;
+}
+
+function setYarnLine(name) {
+    yarnLine = name ? yarnLines.find(line => line.name === name) || null : null;
+    yarnMap = new Map();
+    yarnMatch = null;
+    yarnPaletteKey = '';
+    $('yarn-line').value = yarnLine ? yarnLine.name : '';
+    $('yarn-current').textContent = yarnLine ? yarnLine.name : 'Original colors';
+    $('yarn-toggle').title = yarnLine ? `Previewing yarn line ${yarnLine.name}` : 'Yarn match - showing original colors';
+    $('yarn-menu').toggleAttribute('data-previewing', Boolean(yarnLine));
+    $('export-yarn-label').hidden = !yarnLine;
+    $('export-yarn-name').textContent = yarnLine ? yarnLine.name : '';
+    if (!yarnLine) $('export-yarn').checked = false;
+    document.querySelectorAll('.yarn-option').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.line === name)));
+    if (yarnLine) refreshYarnMapping();
+    else {
+        renderYarnMapping();
+        paintedTiles = null;
+        render();
+    }
+    renderPalette();
+}
+
+function swatchChip(color) {
+    const chip = document.createElement('span');
+    chip.className = 'yarn-chip';
+    chip.style.background = color;
+    return chip;
+}
+
+function renderYarnMapping() {
+    const list = $('yarn-mapping');
+    list.replaceChildren();
+    $('yarn-mapping-section').hidden = !yarnLine || !yarnMatch || !yarnMatch.mapping.size;
+    if ($('yarn-mapping-section').hidden) return;
+    const counts = new Map(colorUsage(project.cells, project.palette).map(item => [item.color, item.count]));
+    const rows = [...yarnMatch.mapping].sort((a, b) => (counts.get(b[0]) || 0) - (counts.get(a[0]) || 0));
+    for (const [color, match] of rows) {
+        const item = document.createElement('li');
+        const arrow = document.createElement('span');
+        arrow.textContent = '\u2192';
+        const yarn = document.createElement('span');
+        yarn.textContent = match.yarn;
+        const score = document.createElement('span');
+        score.className = 'yarn-match-score';
+        if (match.score < USABLE_SCORE) score.classList.add('weak');
+        score.textContent = match.shared ? 'no free yarn' : `${Math.round(match.score)}`;
+        score.title = match.shared
+            ? 'This line has fewer yarns than your pattern has distinct colors, so this color reuses its nearest yarn.'
+            : `Match score ${Math.round(match.score)} of 100`;
+        item.title = `${color} \u2192 ${match.yarn}`;
+        item.append(swatchChip(color), arrow, swatchChip(match.yarn), yarn, score);
+        list.append(item);
+    }
+}
+
+function renderYarnRanking(ranking, colorCount) {
+    const list = $('yarn-ranking');
+    list.replaceChildren();
+    $('yarn-status').textContent = !colorCount
+        ? 'Add or paint colors to get yarn recommendations.'
+        : `Best of ${yarnLines.length} lines for your ${colorCount} color${colorCount === 1 ? '' : 's'}. Scores weigh how close each color is and how much of the pattern uses it.`;
+    ranking.forEach((result, index) => {
+        const item = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'yarn-option';
+        button.dataset.line = result.name;
+        button.setAttribute('aria-pressed', String(yarnLine?.name === result.name));
+        const rank = document.createElement('span');
+        rank.className = 'yarn-rank';
+        rank.textContent = index === 0 ? 'Best' : `#${index + 1}`;
+        const name = document.createElement('span');
+        name.className = 'yarn-name';
+        name.textContent = result.name;
+        const score = document.createElement('span');
+        score.className = 'yarn-score';
+        score.textContent = Math.round(result.score);
+        score.title = 'Overall match score out of 100';
+        const detail = document.createElement('span');
+        detail.className = 'yarn-detail';
+        detail.textContent = `${result.usable} of ${result.total} colors usable \u00b7 ${result.size} yarns in line`;
+        const strip = document.createElement('span');
+        strip.className = 'yarn-strip';
+        strip.setAttribute('aria-hidden', 'true');
+        for (const match of result.mapping.values()) {
+            const part = document.createElement('span');
+            part.style.background = match.yarn;
+            strip.append(part);
+        }
+        button.append(rank, name, score, detail, strip);
+        button.addEventListener('click', () => setYarnLine(yarnLine?.name === result.name ? '' : result.name));
+        item.append(button);
+        list.append(item);
+    });
+    // Mirror the top matches in the selector so keyboard users can reach them first.
+    $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
+    if (ranking.length) {
+        const group = document.createElement('optgroup');
+        group.label = 'Recommended';
+        group.dataset.recommended = '';
+        group.append(...ranking.map((result, index) => new Option(`${index + 1}. ${result.name} - ${Math.round(result.score)}`, result.name)));
+        $('yarn-line').options[0].after(group);
+        $('yarn-line').value = yarnLine ? yarnLine.name : '';
+    }
+}
+
+async function refreshYarnPanel() {
+    if (!project) return;
+    $('yarn-status').textContent = yarnLines ? 'Scoring yarn lines...' : 'Loading the yarn catalog...';
+    try {
+        await loadYarnLines();
+    } catch (error) {
+        $('yarn-status').textContent = error.message;
+        return;
+    }
+    // Let the status paint before the ranking work.
+    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve)));
+    if (!project || !$('yarn-menu').open) return;
+    const usage = colorUsage(project.cells, project.palette);
+    renderYarnRanking(rankYarnLines(usage, yarnLines, 5), usage.length);
+    if (yarnLine) refreshYarnMapping();
+}
+
+$('yarn-menu').addEventListener('toggle', () => {
+    if ($('yarn-menu').open) refreshYarnPanel();
+});
+$('yarn-menu').addEventListener('keydown', event => {
+    if (event.key === 'Escape' && $('yarn-menu').open) {
+        event.preventDefault();
+        event.stopPropagation();
+        $('yarn-menu').open = false;
+        $('yarn-toggle').focus({ preventScroll: true });
+    }
+});
+$('yarn-line').addEventListener('change', () => setYarnLine($('yarn-line').value));
 
 // Sizes the canvas element and workspace for the current zoom without touching the bitmap.
 function layoutCanvas() {
@@ -378,16 +586,16 @@ function updateCellLayer(x0, y0, x1, y1, withPreview) {
         cellImage = cellLayerContext.createImageData(project.cols, project.rows);
         cellWords = new Uint32Array(cellImage.data.buffer);
     }
-    const cells = project.cells, cols = project.cols;
+    const cells = project.cells, cols = project.cols, recolor = Boolean(yarnLine);
     for (let y = y0; y < y1; y++) {
         for (let index = y * cols + x0, end = y * cols + x1; index < end; index++) {
             const color = cells[index];
-            cellWords[index] = color === null ? 0 : colorWord(color);
+            cellWords[index] = color === null ? 0 : colorWord(recolor ? displayColor(color) : color);
         }
     }
     if (withPreview) for (const [index, color] of placement.preview()) {
         const x = index % cols, y = (index - x) / cols;
-        if (x >= x0 && x < x1 && y >= y0 && y < y1) cellWords[index] = colorWord(color);
+        if (x >= x0 && x < x1 && y >= y0 && y < y1) cellWords[index] = colorWord(recolor ? displayColor(color) : color);
     }
     cellLayerContext.putImageData(cellImage, 0, 0, x0, y0, x1 - x0, y1 - y0);
 }
@@ -430,8 +638,12 @@ function paintLayers(x0, y0, x1, y1) {
     if (crop || tool === 'sample' || $('reference-toggle').checked) {
         context.globalAlpha = crop || tool === 'sample' ? 1 : 0.6;
         // Drawing only the needed part of the reference keeps tile repaints proportional to their size.
-        const sx = x0 * cellWidth, sy = y0 * cellHeight, sw = (x1 - x0) * cellWidth, sh = (y1 - y0) * cellHeight;
-        context.drawImage(reference, sx, sy, sw, sh, sx, sy, sw, sh);
+        const rect = referenceRect(project);
+        const left = Math.max(x0 * cellWidth, rect.x), top = Math.max(y0 * cellHeight, rect.y);
+        const right = Math.min(x1 * cellWidth, rect.x + rect.width), bottom = Math.min(y1 * cellHeight, rect.y + rect.height);
+        if (right > left && bottom > top) {
+            context.drawImage(reference, left - rect.x, top - rect.y, right - left, bottom - top, left, top, right - left, bottom - top);
+        }
         context.globalAlpha = 1;
     }
     if (crop || tool !== 'sample') {
@@ -491,8 +703,12 @@ function renderCells(minX, minY, maxX, maxY) {
 
 async function decodeImage(src) {
     const image = new Image();
-    image.src = src;
-    await image.decode();
+    // Waits for the load event rather than decode(), which stalls while the tab is in the background.
+    await new Promise((resolve, reject) => {
+        image.onload = resolve;
+        image.onerror = () => reject(new Error('The source image cannot be decoded.'));
+        image.src = src;
+    });
     if (!image.naturalWidth || !image.naturalHeight) throw new Error('This image has no usable dimensions.');
     return image;
 }
@@ -500,7 +716,8 @@ async function decodeImage(src) {
 async function activate(data) {
     validateProject(data);
     const image = await decodeImage(data.reference);
-    if (image.naturalWidth !== data.width || image.naturalHeight !== data.height) throw new Error('The project reference dimensions are invalid.');
+    const rect = referenceRect(data);
+    if (image.naturalWidth !== rect.width || image.naturalHeight !== rect.height) throw new Error('The project reference dimensions are invalid.');
     if (!(await protectUnsaved())) return false;
     project = data;
     reference = image;
@@ -524,6 +741,10 @@ async function activate(data) {
     $('workspace').scrollTo(0, 0);
     $('save-state').textContent = 'Saved on this device';
     $('project-dialog').close();
+    $('yarn-ranking').replaceChildren();
+    $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
+    $('yarn-menu').open = false;
+    if (yarnLine) setYarnLine('');
     updateControls();
     clearGridError();
     renderPalette();
@@ -565,8 +786,8 @@ function addPaletteColor(color) {
 
 function sampleColor(x, y) {
     const pixel = sampleContext.getImageData(
-        Math.max(0, Math.min(project.width - 1, Math.floor(x))),
-        Math.max(0, Math.min(project.height - 1, Math.floor(y))), 1, 1).data;
+        Math.max(0, Math.min(sampleCanvas.width - 1, Math.floor(x))),
+        Math.max(0, Math.min(sampleCanvas.height - 1, Math.floor(y))), 1, 1).data;
     return '#' + Array.from(pixel.slice(0, 3), value => value.toString(16).padStart(2, '0')).join('');
 }
 
@@ -991,6 +1212,117 @@ $('grid-number').addEventListener('keydown', event => {
     }
 });
 
+// Canvas edits change the grid and its board together. Adding cells only grows the board and
+// leaves the reference untouched; mirror and rotate transform the reference's own pixels.
+function transformReference(width, height, draw) {
+    const output = document.createElement('canvas');
+    output.width = width;
+    output.height = height;
+    draw(output.getContext('2d'));
+    return output;
+}
+
+function applyCanvasEdit(changes, output, message) {
+    remember(snapshot());
+    Object.assign(project, changes);
+    if (output) {
+        project.reference = output.toDataURL('image/png');
+        reference = output;
+    }
+    prepareSampler();
+    cursor = { x: 0, y: 0 };
+    changed(); render();
+    notify(message);
+}
+
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+function addCells(sides) {
+    if (!project || crop) return;
+    const { left = 0, right = 0, top = 0, bottom = 0 } = sides;
+    const grown = extendCells(project.cells, project.cols, project.rows, sides);
+    if (Math.max(grown.cols, grown.rows) > MAX_SIDE) throw new Error(`Patterns are limited to ${MAX_SIDE} cells per side.`);
+    const added = left || right ? plural(left + right, 'column') : plural(top + bottom, 'row');
+    const where = left ? 'to the left' : right ? 'to the right' : top ? 'above' : 'below';
+    applyCanvasEdit({ ...grown, ...extendBoard(project, sides) }, null,
+        `Added ${added} ${where}. Undo removes ${left + right + top + bottom === 1 ? 'it' : 'them'}.`);
+}
+
+function mirrorCanvas(axis) {
+    if (!project || crop) return;
+    const { width, height } = referenceRect(project);
+    const output = transformReference(width, height, ctx => {
+        if (axis === 'horizontal') ctx.setTransform(-1, 0, 0, 1, width, 0);
+        else ctx.setTransform(1, 0, 0, -1, 0, height);
+        ctx.drawImage(reference, 0, 0);
+    });
+    applyCanvasEdit({ cells: mirrorCells(project.cells, project.cols, project.rows, axis), ...mirrorBoard(project, axis) }, output,
+        `Mirrored ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}.`);
+}
+
+function rotateCanvas(clockwise) {
+    if (!project || crop) return;
+    const { width, height } = referenceRect(project);
+    const output = transformReference(height, width, ctx => {
+        if (clockwise) ctx.setTransform(0, 1, -1, 0, height, 0);
+        else ctx.setTransform(0, -1, 1, 0, 0, width);
+        ctx.drawImage(reference, 0, 0);
+    });
+    applyCanvasEdit({ ...rotateCells(project.cells, project.cols, project.rows, clockwise), ...rotateBoard(project, clockwise) }, output,
+        `Rotated 90\u00b0 ${clockwise ? 'right' : 'left'}.`);
+}
+
+action('add-col-left', () => addCells({ left: 1 }));
+action('add-col-right', () => addCells({ right: 1 }));
+action('add-row-above', () => addCells({ top: 1 }));
+action('add-row-below', () => addCells({ bottom: 1 }));
+action('mirror-horizontal', () => mirrorCanvas('horizontal'));
+action('mirror-vertical', () => mirrorCanvas('vertical'));
+action('rotate-right', () => rotateCanvas(true));
+action('rotate-left', () => rotateCanvas(false));
+
+let extendAxis = 'columns';
+function extendRoom() {
+    return MAX_SIDE - (extendAxis === 'columns' ? project.cols : project.rows);
+}
+function openExtend(axis) {
+    if (!project || crop) return;
+    extendAxis = axis;
+    const columns = axis === 'columns', room = extendRoom();
+    $('extend-title').textContent = $('extend-apply').textContent = columns ? 'Add columns' : 'Add rows';
+    $('extend-side').replaceChildren(...(columns ? [['left', 'Left side'], ['right', 'Right side']] : [['top', 'Top'], ['bottom', 'Bottom']])
+        .map(([value, label]) => new Option(label, value)));
+    $('extend-count').max = room;
+    $('extend-count').value = Math.min(1, room);
+    $('extend-limit').textContent = `This pattern has ${plural(columns ? project.cols : project.rows, columns ? 'column' : 'row')}. ` +
+        `Up to ${room} more fit within the ${MAX_SIDE}-cell limit.`;
+    $('extend-dialog').querySelector('.dialog-message').textContent = '';
+    $('extend-dialog').showModal();
+    $('extend-count').select();
+}
+action('add-cols', () => openExtend('columns'));
+action('add-rows', () => openExtend('rows'));
+function applyExtend() {
+    const input = $('extend-count'), count = Number(input.value), room = extendRoom();
+    if (!input.value.trim() || !Number.isInteger(count) || count < 1 || count > room) {
+        $('extend-dialog').querySelector('.dialog-message').textContent = `Enter a whole number from 1 to ${room}.`;
+        input.focus();
+        return;
+    }
+    $('extend-dialog').close();
+    addCells({ [$('extend-side').value]: count });
+}
+action('extend-apply', applyExtend);
+$('extend-count').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); $('extend-apply').click(); }
+});
+$('extend-count').addEventListener('input', () => { $('extend-dialog').querySelector('.dialog-message').textContent = ''; });
+
+// Crop works in whole reference pixels; a padded board may have a fractional edge.
+function cropBounds() {
+    return { width: Math.max(1, Math.floor(project.width + 1e-6)), height: Math.max(1, Math.floor(project.height + 1e-6)) };
+}
+
 function renderCrop() {
     $('crop-overlay').hidden = !crop;
     if (!crop) return;
@@ -1005,11 +1337,11 @@ function renderCrop() {
     $('crop-height').value = rect.height;
     $('crop-width').disabled = ratioKey !== 'free';
     $('crop-height').disabled = ratioKey !== 'free';
-    $('crop-width').max = project.width - rect.x;
-    $('crop-height').max = project.height - rect.y;
+    $('crop-width').max = cropBounds().width - rect.x;
+    $('crop-height').max = cropBounds().height - rect.y;
     $('crop-scale-label').hidden = ratioKey === 'free';
     if (ratioKey !== 'free') {
-        const full = fitCrop(project.width, project.height, CROP_RATIOS[ratioKey]);
+        const full = fitCrop(cropBounds().width, cropBounds().height, CROP_RATIOS[ratioKey]);
         const percent = Math.max(1, Math.round(rect.width / full.width * 100));
         $('crop-scale').value = percent;
         $('crop-scale-value').value = `${percent}%`;
@@ -1041,7 +1373,7 @@ action('crop-start', () => {
     if (!project || crop) return;
     const workspace = $('workspace');
     crop = {
-        rect: fitCrop(project.width, project.height, null), ratioKey: 'free',
+        rect: fitCrop(cropBounds().width, cropBounds().height, null), ratioKey: 'free',
         previousView: { zoom, x: workspace.scrollLeft, y: workspace.scrollTop },
     };
     zoom = 1;
@@ -1061,7 +1393,7 @@ $('crop-ratio').addEventListener('change', () => {
     if (!crop) return;
     try {
         const key = $('crop-ratio').value;
-        const rect = key === 'free' ? crop.rect : fitCrop(project.width, project.height, CROP_RATIOS[key]);
+        const rect = key === 'free' ? crop.rect : fitCrop(cropBounds().width, cropBounds().height, CROP_RATIOS[key]);
         crop.rect = rect;
         crop.ratioKey = key;
         $('crop-error').textContent = '';
@@ -1074,16 +1406,16 @@ $('crop-ratio').addEventListener('change', () => {
 $('crop-scale').addEventListener('input', () => {
     if (!crop || crop.ratioKey === 'free') return;
     const old = crop.rect;
-    const next = fitCrop(project.width, project.height, CROP_RATIOS[crop.ratioKey], Number($('crop-scale').value) / 100);
+    const next = fitCrop(cropBounds().width, cropBounds().height, CROP_RATIOS[crop.ratioKey], Number($('crop-scale').value) / 100);
     crop.rect = moveCrop(next, old.x + old.width / 2 - next.x - next.width / 2,
-        old.y + old.height / 2 - next.y - next.height / 2, project.width, project.height);
+        old.y + old.height / 2 - next.y - next.height / 2, cropBounds().width, cropBounds().height);
     renderCrop();
 });
 for (const dimension of ['width', 'height']) {
     $(`crop-${dimension}`).addEventListener('change', event => {
         if (!crop || crop.ratioKey !== 'free') return;
         const value = Math.floor(Number(event.target.value));
-        const limit = dimension === 'width' ? project.width - crop.rect.x : project.height - crop.rect.y;
+        const limit = dimension === 'width' ? cropBounds().width - crop.rect.x : cropBounds().height - crop.rect.y;
         if (!Number.isFinite(value) || value < 1 || value > limit) {
             $('crop-error').textContent = `Crop ${dimension} must be from 1 to ${limit} pixels.`;
         } else {
@@ -1110,8 +1442,8 @@ $('crop-overlay').addEventListener('pointermove', event => {
     const dx = (event.clientX - cropDrag.x) * project.width / cropDrag.bounds.width;
     const dy = (event.clientY - cropDrag.y) * project.height / cropDrag.bounds.height;
     crop.rect = cropDrag.corner
-        ? resizeCrop(cropDrag.rect, cropDrag.corner, dx, dy, project.width, project.height, CROP_RATIOS[crop.ratioKey])
-        : moveCrop(cropDrag.rect, dx, dy, project.width, project.height);
+        ? resizeCrop(cropDrag.rect, cropDrag.corner, dx, dy, cropBounds().width, cropBounds().height, CROP_RATIOS[crop.ratioKey])
+        : moveCrop(cropDrag.rect, dx, dy, cropBounds().width, cropBounds().height);
     renderCrop();
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) $('crop-overlay').addEventListener(name, endCropDrag);
@@ -1129,8 +1461,8 @@ $('crop-frame').addEventListener('keydown', event => {
         dy *= ratio[1];
     }
     crop.rect = corner
-        ? resizeCrop(crop.rect, corner, dx, dy, project.width, project.height, ratio)
-        : moveCrop(crop.rect, dx, dy, project.width, project.height);
+        ? resizeCrop(crop.rect, corner, dx, dy, cropBounds().width, cropBounds().height, ratio)
+        : moveCrop(crop.rect, dx, dy, cropBounds().width, cropBounds().height);
     renderCrop();
 });
 
@@ -1138,7 +1470,7 @@ function applyCrop() {
     if (!crop) return;
     endCropDrag();
     const rect = crop.rect;
-    if (rect.x === 0 && rect.y === 0 && rect.width === project.width && rect.height === project.height) {
+    if (rect.x === 0 && rect.y === 0 && rect.width === cropBounds().width && rect.height === cropBounds().height && !project.referenceRect) {
         exitCrop();
         notify('The crop already includes the entire image. No changes made.');
         return;
@@ -1146,14 +1478,16 @@ function applyCrop() {
     const output = document.createElement('canvas');
     output.width = rect.width;
     output.height = rect.height;
-    output.getContext('2d').drawImage(reference, rect.x, rect.y, rect.width, rect.height, 0, 0, rect.width, rect.height);
+    // Board space outside the reference stays transparent, which displays and samples as white.
+    const placed = referenceRect(project);
+    output.getContext('2d').drawImage(reference, placed.x - rect.x, placed.y - rect.y);
     const referenceData = output.toDataURL('image/png');
     const longest = Math.max(4, Math.min(MAX_SIDE, Math.round(Math.max(
         rect.width / project.width * project.cols, rect.height / project.height * project.rows))));
     const { cols, rows } = gridDimensions(rect.width, rect.height, longest);
     const cells = cropCells(project, rect, cols, rows);
     remember(snapshot());
-    Object.assign(project, { width: rect.width, height: rect.height, cols, rows, cells, reference: referenceData });
+    Object.assign(project, { width: rect.width, height: rect.height, referenceRect: null, cols, rows, cells, reference: referenceData });
     reference = output;
     prepareSampler();
     cursor = { x: 0, y: 0 };
@@ -1296,6 +1630,196 @@ action('projects', async () => {
     try { await save(); await listProjects(); }
     catch (error) { $('project-list').textContent = error.message; report(error); }
 });
+
+// Start screen: a scrollable list with "Create new" first, then saved projects newest first.
+// Each row's background is a crisp render of the project, cropped to a horizontal slice.
+const PREVIEW_WIDTH = 720;
+const previews = new Map();
+let homeProjects = [];
+
+// Faded reference with the painted cells on top, scaled by a whole number so cells stay square.
+async function projectPreview(data) {
+    const key = `${data.id}:${data.updatedAt}`;
+    let art = previews.get(key);
+    if (!art) {
+        const scale = Math.max(1, Math.ceil(PREVIEW_WIDTH / data.cols));
+        art = document.createElement('canvas');
+        art.width = data.cols * scale;
+        art.height = data.rows * scale;
+        const ctx = art.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, art.width, art.height);
+        try {
+            const image = await decodeImage(data.reference);
+            const rect = referenceRect(data), scaleX = art.width / data.width, scaleY = art.height / data.height;
+            ctx.globalAlpha = 0.35;
+            ctx.drawImage(image, rect.x * scaleX, rect.y * scaleY, rect.width * scaleX, rect.height * scaleY);
+            ctx.globalAlpha = 1;
+        } catch { /* A broken reference still shows the painted cells. */ }
+        const cells = document.createElement('canvas');
+        cells.width = data.cols;
+        cells.height = data.rows;
+        const cellContext = cells.getContext('2d');
+        const pixels = cellContext.createImageData(data.cols, data.rows);
+        const words = new Uint32Array(pixels.data.buffer);
+        data.cells.forEach((color, index) => { if (color !== null) words[index] = colorWord(color); });
+        cellContext.putImageData(pixels, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(cells, 0, 0, art.width, art.height);
+        for (const old of previews.keys()) if (old.startsWith(`${data.id}:`)) previews.delete(old);
+        previews.set(key, art);
+    }
+    const copy = document.createElement('canvas');
+    copy.width = art.width;
+    copy.height = art.height;
+    copy.getContext('2d').drawImage(art, 0, 0);
+    return copy;
+}
+
+// Shows the band of rows with the most painted cells (centered when nothing is painted).
+function focusPreviewSlice(preview, data) {
+    const box = preview.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const visibleRows = data.rows * Math.min(1, (box.height / box.width) / (data.rows / data.cols));
+    const band = Math.ceil(visibleRows);
+    if (band >= data.rows) { preview.style.objectPosition = '50% 50%'; return; }
+    const painted = new Uint32Array(data.rows);
+    data.cells.forEach((color, index) => { if (color !== null) painted[Math.floor(index / data.cols)]++; });
+    let sum = 0;
+    for (let row = 0; row < band; row++) sum += painted[row];
+    let best = sum, bestStart = 0;
+    for (let row = band; row < data.rows; row++) {
+        sum += painted[row] - painted[row - band];
+        if (sum > best) { best = sum; bestStart = row - band + 1; }
+    }
+    const percent = best ? bestStart / (data.rows - band) * 100 : 50;
+    preview.style.objectPosition = `50% ${percent.toFixed(2)}%`;
+}
+
+function projectRow(data) {
+    const row = document.createElement('li');
+    row.className = 'home-row';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'row-open';
+    const editedAt = new Date(data.updatedAt);
+    open.title = `${data.name}\n${data.cols} x ${data.rows} cells\nEdited ${editedAt.toLocaleString()}`;
+    open.setAttribute('aria-label', `Open ${data.name}, ${data.cols} by ${data.rows} cells, edited ${editedAt.toLocaleString()}`);
+    const art = document.createElement('span');
+    art.className = 'row-art loading';
+    art.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'row-text';
+    const name = document.createElement('span');
+    name.className = 'row-name';
+    name.textContent = data.name;
+    const meta = document.createElement('span');
+    meta.className = 'row-meta';
+    meta.textContent = `${data.cols} \u00d7 ${data.rows} \u00b7 ${editedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+    text.append(name, meta);
+    open.append(art, text);
+    open.addEventListener('click', async () => {
+        try { if (await activate(data)) notify(`Opened ${data.name}.`); }
+        catch (error) { report(error); }
+    });
+    const menu = document.createElement('details');
+    menu.className = 'row-menu';
+    const summary = document.createElement('summary');
+    summary.setAttribute('aria-label', `More options for ${data.name}`);
+    summary.title = 'More options';
+    summary.textContent = '\u22ee';
+    const actions = document.createElement('div');
+    actions.className = 'row-menu-actions';
+    const backup = document.createElement('button');
+    backup.type = 'button';
+    backup.textContent = 'Download';
+    backup.addEventListener('click', () => {
+        menu.open = false;
+        download(new Blob([JSON.stringify(data)], { type: 'application/json' }), 'pattern.json', data.name);
+        notify(`Downloaded a backup of ${data.name}.`);
+    });
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', async () => {
+        menu.open = false;
+        if (!confirm(`Delete "${data.name}" from this browser? This cannot be undone.`)) return;
+        try {
+            await store.run('readwrite', objectStore => objectStore.delete(data.id));
+            previews.delete(`${data.id}:${data.updatedAt}`);
+            homeProjects = homeProjects.filter(item => item.id !== data.id);
+            drawHome();
+            $('upload').focus({ preventScroll: true });
+            notify(`Deleted ${data.name}.`);
+        } catch (error) { report(error); }
+    });
+    actions.append(backup, remove);
+    menu.append(summary, actions);
+    menu.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && menu.open) {
+            event.preventDefault();
+            menu.open = false;
+            summary.focus({ preventScroll: true });
+        }
+    });
+    row.append(open, menu);
+    projectPreview(data)
+        .then(preview => {
+            art.classList.remove('loading');
+            art.replaceChildren(preview);
+            focusPreviewSlice(preview, data);
+        })
+        .catch(() => { art.classList.remove('loading'); art.classList.add('broken'); });
+    return row;
+}
+
+function drawHome() {
+    $('recent-list').querySelectorAll('.home-row:not(.create-row)').forEach(row => row.remove());
+    $('recent-list').append(...homeProjects.map(projectRow));
+    $('recent-title').textContent = homeProjects.length ? `Your projects (${homeProjects.length})` : 'Your projects';
+    if (store) $('recent-status').textContent = homeProjects.length ? '' : 'Projects you save will appear here.';
+    // Returning users came for their projects, so compact the intro to bring the list up.
+    $('empty').classList.toggle('has-projects', homeProjects.length > 0);
+}
+
+async function renderHome() {
+    await storeReady;
+    if (project) return;
+    if (!store) {
+        homeProjects = [];
+        $('recent-status').textContent = 'Browser saves are unavailable here. Import a project backup to keep working.';
+    } else {
+        try {
+            homeProjects = (await store.run('readonly', objectStore => objectStore.getAll())).sort((a, b) => b.updatedAt - a.updatedAt);
+        } catch (error) {
+            homeProjects = [];
+            $('recent-status').textContent = `Saved projects could not be loaded: ${error.message}`;
+        }
+    }
+    if (!project) drawHome();
+}
+
+// The visible slice depends on the row's shape, so refit it when the list width changes.
+let homeWidth = 0;
+new ResizeObserver(([entry]) => {
+    const width = Math.round(entry.contentRect.width);
+    if (project || width === homeWidth) return;
+    homeWidth = width;
+    $('recent-list').querySelectorAll('.home-row:not(.create-row)').forEach((row, index) => {
+        const preview = row.querySelector('.row-art canvas');
+        if (preview && homeProjects[index]) focusPreviewSlice(preview, homeProjects[index]);
+    });
+}).observe($('recent-list'));
+action('home-import', () => { $('project-file').click(); });
+document.addEventListener('pointerdown', event => {
+    document.querySelectorAll('.row-menu[open]').forEach(menu => { if (!menu.contains(event.target)) menu.open = false; });
+}, true);
+document.addEventListener('toggle', event => {
+    // Only one row menu open at a time.
+    if (event.target.matches?.('.row-menu[open]')) {
+        document.querySelectorAll('.row-menu[open]').forEach(menu => { if (menu !== event.target) menu.open = false; });
+    }
+}, true);
 action('save-now', async () => { await save(); await listProjects(); notify('Project saved on this device.'); });
 action('import-project', () => { $('project-file').click(); });
 $('project-file').addEventListener('change', async event => {
@@ -1312,11 +1836,11 @@ $('project-file').addEventListener('change', async event => {
     } catch (error) { report(error); }
 });
 
-function download(blob, extension) {
+function download(blob, extension, name = project.name) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    const filename = project.name.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '') || 'pattern';
+    const filename = name.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-|-$/g, '') || 'pattern';
     link.download = `${filename}.${extension}`;
     document.body.append(link);
     link.click();
@@ -1347,18 +1871,19 @@ action('download-image', async () => {
         ctx.fillStyle = $('export-background').value;
         ctx.fillRect(0, 0, output.width, output.height);
     }
+    const yarnColors = Boolean(yarnLine) && $('export-yarn').checked;
     project.cells.forEach((color, index) => {
         if (color === null) return;
         const x = index % project.cols, y = Math.floor(index / project.cols);
         const left = Math.round(x * output.width / project.cols), top = Math.round(y * output.height / project.rows);
         const right = Math.round((x + 1) * output.width / project.cols), bottom = Math.round((y + 1) * output.height / project.rows);
-        ctx.fillStyle = color;
+        ctx.fillStyle = yarnColors ? displayColor(color) : color;
         ctx.fillRect(left, top, right - left, bottom - top);
     });
     const blob = await new Promise(resolve => output.toBlob(resolve, `image/${format}`, 0.95));
     if (!blob || blob.type !== `image/${format}`) throw new Error(`This browser cannot export ${format.toUpperCase()}. Please choose PNG.`);
     download(blob, format === 'jpeg' ? 'jpg' : format);
-    notify(`Exported ${output.width} x ${output.height}px ${format.toUpperCase()} without reference or gridlines.`);
+    notify(`Exported ${output.width} x ${output.height}px ${format.toUpperCase()}${yarnColors ? ` in ${yarnLine.name} yarn colors` : ''} without reference or gridlines.`);
 });
 document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => $(button.dataset.close).close()));
 new ResizeObserver(render).observe($('workspace'));
@@ -1379,3 +1904,4 @@ window.addEventListener('beforeunload', event => {
 });
 renderPalette();
 updateControls();
+renderHome();
