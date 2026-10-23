@@ -240,8 +240,19 @@ line's score works like this:
 - **Usable colors.** A color is usable when its own yarn scores 70 or more.
   Ties are broken by more usable colors, then larger lines.
 
+Above the top matches, a **Custom mix** builds a palette that ignores brand
+lines: each color gets the closest yarn from all ~28,000 yarns, with the same
+scoring and weighting. Distinct colors still get distinct yarns (each color
+considers its 8 nearest yarns, heaviest colors pick first), and identical hexes
+sold by different lines count once. Selecting it previews the mix, and the color
+table lists each yarn's brand line and hex as a shopping list. Because it can
+pick from every line, it normally scores at least as high as the best single
+line. The trade-off is buying from several brands, which can mean different
+weights and fibers.
+
 Export can optionally render the previewed yarn colors (**Use previewed yarn
 colors** in the export dialog); otherwise it uses the original colors. The
 scoring functions (`colorUsage`, `prepareYarnLines`, `matchYarnLine`,
-`rankYarnLines`) live in [palette.js](palette.js). Ranking all lines takes
-about 30 ms for 16 colors and about 125 ms for the 32-color maximum.
+`rankYarnLines`, `matchCustomMix`, `closestYarn`) live in [palette.js](palette.js).
+Ranking all lines takes about 30 ms for 16 colors and about 125 ms for the
+32-color maximum; the custom mix adds about 15 ms.

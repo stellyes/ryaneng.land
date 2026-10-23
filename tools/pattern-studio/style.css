@@ -710,11 +710,21 @@ input[type="color"] {
 .yarn-strip span {
   flex: 1;
 }
+#yarn-custom {
+  margin-top: 6px;
+}
+#yarn-custom-section .fine {
+  margin-bottom: 0;
+}
 #yarn-mapping li {
   display: flex;
   align-items: center;
   gap: 6px;
   font: 11px monospace;
+}
+#yarn-mapping .yarn-source {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .yarn-chip {
   flex: none;

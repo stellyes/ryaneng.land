@@ -7,7 +7,7 @@
 <script type="module">
 import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
-import { ZERO_SCORE_DISTANCE, colorDistance, colorUsage, findClosestColor, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
+import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
 import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth } from '../tools/pattern-studio/objects.js';
 const results = [];
 const assert = (condition, name) => {
@@ -61,6 +61,17 @@ try {
     const unweighted = matchYarnLine(colorUsage(['#ff0000', '#00ff00'], []), prepareYarnLines({ Red: ['#ff0000', '#000000'] })[0]);
     assert(weighted.score > unweighted.score, 'Colors covering more of the pattern weigh more in the score');
     assert(rankYarnLines([], lines).length === 0 && matchYarnLine([], lines[0]).score === 0, 'An empty project has no recommendations');
+    const mixLines = prepareYarnLines({
+        Reds: ['#ff0000', '#000000'], Greens: ['#00ff00', '#000000'], Blues: ['#0505f0'],
+    });
+    const mix = matchCustomMix(rgb, mixLines);
+    assert(mix.custom && mix.mapping.get('#ff0000').line === 'Reds' && mix.mapping.get('#00ff00').line === 'Greens' &&
+        mix.mapping.get('#0000ff').line === 'Blues' && mix.lines === 3 && mix.size === 3, 'Custom mix picks each color\'s closest yarn from any line');
+    assert(mix.score > Math.max(...rankYarnLines(rgb, mixLines, 3).map(result => result.score)), 'Custom mix beats every single line it draws from');
+    const twins = matchCustomMix(colorUsage(['#ff0000', '#ff0000', '#e00000'], []), prepareYarnLines({ A: ['#ff0000'], B: ['#ff0000', '#d80000'] }));
+    assert(twins.mapping.get('#ff0000').yarn === '#ff0000' && twins.mapping.get('#e00000').yarn === '#d80000' && twins.size === 2,
+        'Distinct colors get distinct yarns and identical hexes across lines count once');
+    assert(closestYarn('#0000fa', mixLines).line === 'Blues' && matchCustomMix([], mixLines).total === 0, 'Closest yarn searches every line; empty projects have no mix');
     for (const invalid of [null, [], { Bad: [] }, { Bad: ['red'] }]) {
         rejects(() => prepareYarnLines(invalid), `Yarn catalog rejects ${JSON.stringify(invalid)}`);
     }

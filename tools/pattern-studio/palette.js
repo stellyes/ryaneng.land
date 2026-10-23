@@ -147,3 +147,68 @@ export function rankYarnLines(usage, lines, limit = 5) {
         .sort((a, b) => b.score - a.score || b.usable - a.usable || b.size - a.size || a.name.localeCompare(b.name))
         .slice(0, limit);
 }
+
+export const CUSTOM_MIX = 'Custom mix';
+
+// The k nearest distinct yarn colors across every line, closest first. Ties keep catalog order.
+function nearestYarns(lab, lines, k) {
+    const best = [];
+    for (const line of lines) {
+        const labs = line.labs;
+        for (let y = 0; y < line.colors.length; y++) {
+            const dl = lab[0] - labs[y * 3], da = lab[1] - labs[y * 3 + 1], db = lab[2] - labs[y * 3 + 2];
+            const distance = Math.sqrt(dl * dl + da * da + db * db);
+            if (best.length === k && distance >= best[k - 1].distance) continue;
+            const yarn = line.colors[y].toLowerCase();
+            const same = best.findIndex(entry => entry.yarn === yarn);
+            if (same >= 0) continue;
+            let at = best.length;
+            while (at > 0 && best[at - 1].distance > distance) at--;
+            best.splice(at, 0, { yarn, line: line.name, distance });
+            if (best.length > k) best.pop();
+        }
+    }
+    return best;
+}
+
+// Nearest yarn to one color across all lines, with the line it comes from.
+export function closestYarn(color, lines) {
+    const [match] = nearestYarns(toOklab(color), lines, 1);
+    if (!match) throw new Error('The yarn catalog has no colors.');
+    return match;
+}
+
+// Builds a cross-brand palette: every project color gets the closest yarn from any line.
+// Distinct color groups still get distinct yarns, using each group's nearest few candidates.
+export function matchCustomMix(usage, lines, candidates = 8) {
+    const mapping = new Map();
+    if (!usage.length) return { name: CUSTOM_MIX, custom: true, size: 0, lines: 0, score: 0, usable: 0, total: 0, needed: 0, mapping };
+    const groups = groupColors(usage);
+    const options = groups.map(group => nearestYarns(group.lab, lines, candidates));
+    const pairs = [];
+    options.forEach((list, g) => list.forEach(option => pairs.push({ g, option })));
+    pairs.sort((a, b) => a.option.distance - b.option.distance || a.g - b.g);
+    const assigned = new Array(groups.length).fill(null), taken = new Set();
+    for (const { g, option } of pairs) {
+        if (assigned[g] || taken.has(option.yarn)) continue;
+        assigned[g] = option;
+        taken.add(option.yarn);
+    }
+    let score = 0, usable = 0;
+    groups.forEach((group, g) => {
+        // Only when every nearby candidate went to a heavier color does a group share its nearest yarn.
+        const choice = assigned[g] || options[g][0];
+        for (const member of group.members) {
+            const [l, a, b] = toOklab(choice.yarn);
+            const value = matchScore(Math.hypot(member.lab[0] - l, member.lab[1] - a, member.lab[2] - b));
+            mapping.set(member.color, { yarn: choice.yarn, line: choice.line, score: value, shared: !assigned[g] });
+            score += member.weight * value;
+            if (value >= USABLE_SCORE) usable++;
+        }
+    });
+    const used = [...mapping.values()];
+    return {
+        name: CUSTOM_MIX, custom: true, size: new Set(used.map(match => match.yarn)).size,
+        lines: new Set(used.map(match => match.line)).size, score, usable, total: mapping.size, needed: groups.length, mapping,
+    };
+}

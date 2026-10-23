@@ -2,7 +2,7 @@ import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extend
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, strokeWidth } from './objects.js';
-import { USABLE_SCORE, colorUsage, findClosestColor, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
+import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchCustomMix, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -313,7 +313,7 @@ function displayColor(color) {
     let yarn = yarnMap.get(color);
     if (yarn === undefined) {
         // Colors outside the current match (e.g. painted since it was computed) use their nearest yarn.
-        try { yarn = findClosestColor(color, yarnLine.colors); } catch { yarn = color; }
+        try { yarn = yarnLine.custom ? closestYarn(color, yarnLines).yarn : findClosestColor(color, yarnLine.colors); } catch { yarn = color; }
         yarnMap.set(color, yarn);
     }
     return yarn;
@@ -322,7 +322,8 @@ function displayColor(color) {
 function refreshYarnMapping() {
     if (!yarnLine || !project) return;
     const previous = yarnMap;
-    yarnMatch = matchYarnLine(colorUsage(project.cells, project.palette), yarnLine);
+    const usage = colorUsage(project.cells, project.palette);
+    yarnMatch = yarnLine.custom ? matchCustomMix(usage, yarnLines) : matchYarnLine(usage, yarnLine);
     yarnMap = new Map();
     for (const [color, match] of yarnMatch.mapping) yarnMap.set(color, match.yarn);
     // The match is keyed by lowercase hex; also key the project's own spelling for fast lookups.
@@ -357,7 +358,8 @@ function loadYarnLines() {
 }
 
 function setYarnLine(name) {
-    yarnLine = name ? yarnLines.find(line => line.name === name) || null : null;
+    yarnLine = name === CUSTOM_MIX ? { name: CUSTOM_MIX, custom: true }
+        : name ? yarnLines.find(line => line.name === name) || null : null;
     yarnMap = new Map();
     yarnMatch = null;
     yarnPaletteKey = '';
@@ -397,66 +399,79 @@ function renderYarnMapping() {
         const arrow = document.createElement('span');
         arrow.textContent = '\u2192';
         const yarn = document.createElement('span');
-        yarn.textContent = match.yarn;
+        yarn.className = 'yarn-source';
+        yarn.textContent = match.line ? `${match.line} \u00b7 ${match.yarn}` : match.yarn;
         const score = document.createElement('span');
         score.className = 'yarn-match-score';
         if (match.score < USABLE_SCORE) score.classList.add('weak');
-        score.textContent = match.shared ? 'no free yarn' : `${Math.round(match.score)}`;
-        score.title = match.shared
+        score.textContent = match.shared && !match.line ? 'no free yarn' : `${Math.round(match.score)}`;
+        score.title = match.shared && !match.line
             ? 'This line has fewer yarns than your pattern has distinct colors, so this color reuses its nearest yarn.'
             : `Match score ${Math.round(match.score)} of 100`;
-        item.title = `${color} \u2192 ${match.yarn}`;
+        item.title = `${color} \u2192 ${match.line ? `${match.line} ` : ''}${match.yarn}`;
         item.append(swatchChip(color), arrow, swatchChip(match.yarn), yarn, score);
         list.append(item);
     }
 }
 
-function renderYarnRanking(ranking, colorCount) {
+function yarnOption(result, rankLabel, detailText) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'yarn-option';
+    button.dataset.line = result.name;
+    button.setAttribute('aria-pressed', String(yarnLine?.name === result.name));
+    const rank = document.createElement('span');
+    rank.className = 'yarn-rank';
+    rank.textContent = rankLabel;
+    const name = document.createElement('span');
+    name.className = 'yarn-name';
+    name.textContent = result.name;
+    const score = document.createElement('span');
+    score.className = 'yarn-score';
+    score.textContent = Math.round(result.score);
+    score.title = 'Overall match score out of 100';
+    const detail = document.createElement('span');
+    detail.className = 'yarn-detail';
+    detail.textContent = detailText;
+    const strip = document.createElement('span');
+    strip.className = 'yarn-strip';
+    strip.setAttribute('aria-hidden', 'true');
+    for (const match of result.mapping.values()) {
+        const part = document.createElement('span');
+        part.style.background = match.yarn;
+        strip.append(part);
+    }
+    button.append(rank, name, score, detail, strip);
+    button.addEventListener('click', () => setYarnLine(yarnLine?.name === result.name ? '' : result.name));
+    return button;
+}
+
+function renderYarnRanking(ranking, custom, colorCount) {
     const list = $('yarn-ranking');
     list.replaceChildren();
     $('yarn-status').textContent = !colorCount
         ? 'Add or paint colors to get yarn recommendations.'
         : `Best of ${yarnLines.length} lines for your ${colorCount} color${colorCount === 1 ? '' : 's'}. Scores weigh how close each color is and how much of the pattern uses it.`;
+    $('yarn-custom-section').hidden = !custom.total;
+    $('yarn-custom').replaceChildren();
+    if (custom.total) {
+        $('yarn-custom').append(yarnOption(custom, 'Mix',
+            `${custom.usable} of ${custom.total} colors usable \u00b7 ${custom.size} yarn${custom.size === 1 ? '' : 's'} from ${custom.lines} line${custom.lines === 1 ? '' : 's'}`));
+    }
     ranking.forEach((result, index) => {
         const item = document.createElement('li');
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'yarn-option';
-        button.dataset.line = result.name;
-        button.setAttribute('aria-pressed', String(yarnLine?.name === result.name));
-        const rank = document.createElement('span');
-        rank.className = 'yarn-rank';
-        rank.textContent = index === 0 ? 'Best' : `#${index + 1}`;
-        const name = document.createElement('span');
-        name.className = 'yarn-name';
-        name.textContent = result.name;
-        const score = document.createElement('span');
-        score.className = 'yarn-score';
-        score.textContent = Math.round(result.score);
-        score.title = 'Overall match score out of 100';
-        const detail = document.createElement('span');
-        detail.className = 'yarn-detail';
-        detail.textContent = `${result.usable} of ${result.total} colors usable \u00b7 ${result.size} yarns in line`;
-        const strip = document.createElement('span');
-        strip.className = 'yarn-strip';
-        strip.setAttribute('aria-hidden', 'true');
-        for (const match of result.mapping.values()) {
-            const part = document.createElement('span');
-            part.style.background = match.yarn;
-            strip.append(part);
-        }
-        button.append(rank, name, score, detail, strip);
-        button.addEventListener('click', () => setYarnLine(yarnLine?.name === result.name ? '' : result.name));
-        item.append(button);
+        item.append(yarnOption(result, index === 0 ? 'Best' : `#${index + 1}`,
+            `${result.usable} of ${result.total} colors usable \u00b7 ${result.size} yarns in line`));
         list.append(item);
     });
-    // Mirror the top matches in the selector so keyboard users can reach them first.
+    // Mirror the recommendations in the selector so keyboard users can reach them first.
     $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
     if (ranking.length) {
         const group = document.createElement('optgroup');
         group.label = 'Recommended';
         group.dataset.recommended = '';
-        group.append(...ranking.map((result, index) => new Option(`${index + 1}. ${result.name} - ${Math.round(result.score)}`, result.name)));
+        group.append(new Option(`${CUSTOM_MIX} (any brand) - ${Math.round(custom.score)}`, CUSTOM_MIX),
+            ...ranking.map((result, index) => new Option(`${index + 1}. ${result.name} - ${Math.round(result.score)}`, result.name)));
         $('yarn-line').options[0].after(group);
         $('yarn-line').value = yarnLine ? yarnLine.name : '';
     }
@@ -475,7 +490,7 @@ async function refreshYarnPanel() {
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve)));
     if (!project || !$('yarn-menu').open) return;
     const usage = colorUsage(project.cells, project.palette);
-    renderYarnRanking(rankYarnLines(usage, yarnLines, 5), usage.length);
+    renderYarnRanking(rankYarnLines(usage, yarnLines, 5), matchCustomMix(usage, yarnLines), usage.length);
     if (yarnLine) refreshYarnMapping();
 }
 
@@ -742,6 +757,8 @@ async function activate(data) {
     $('save-state').textContent = 'Saved on this device';
     $('project-dialog').close();
     $('yarn-ranking').replaceChildren();
+    $('yarn-custom').replaceChildren();
+    $('yarn-custom-section').hidden = true;
     $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
     $('yarn-menu').open = false;
     if (yarnLine) setYarnLine('');
