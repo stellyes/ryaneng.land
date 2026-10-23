@@ -3,6 +3,7 @@ import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, strokeWidth } from './objects.js';
 import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchCustomMix, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
+import { createImportPreview } from './import-preview.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -66,7 +67,7 @@ function action(id, handler) {
     $(id).addEventListener('click', () => Promise.resolve().then(() => {
         finishPan();
         finishStroke();
-        if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'delete-color', 'copy', 'cut', 'paste'].includes(id)) placement.commit();
+        if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'delete-color', 'copy', 'cut', 'paste', 'upload', 'new-project', 'new-image'].includes(id)) placement.commit();
     }).then(handler).catch(report));
 }
 for (const [menuId, toggleId, actionsClass] of [['file-menu', 'file-toggle', 'file-actions'], ['canvas-menu', 'canvas-toggle', 'canvas-actions']]) {
@@ -160,7 +161,7 @@ async function save() {
         $('save-state').textContent = 'Save failed - download a backup';
         throw new Error('Could not save your project (storage may be full or blocked). Download a backup. ' + error.message);
     }
-    if (project.id === data.id && revision === savedRevision) {
+    if (project?.id === data.id && revision === savedRevision) {
         dirty = false;
         project.updatedAt = data.updatedAt;
         $('save-state').textContent = 'Saved on this device';
@@ -246,7 +247,7 @@ function updateControls() {
     $('zoom-in').disabled = !active || zoom >= 8;
     if (active) {
         const rect = referenceRect(project);
-        $('dimensions').textContent = `${project.cols} x ${project.rows} cells | Reference ${rect.width} x ${rect.height}px`;
+            $('dimensions').textContent = `${project.cols} x ${project.rows} cells${project.blank ? ' | Blank canvas' : ` | Reference ${rect.width} x ${rect.height}px`}`;
         $('grid-size').value = Math.max(project.cols, project.rows);
         $('grid-number').value = $('grid-size').value;
     }
@@ -392,34 +393,54 @@ function renderYarnMapping() {
     list.replaceChildren();
     $('yarn-mapping-section').hidden = !yarnLine || !yarnMatch || !yarnMatch.mapping.size;
     if ($('yarn-mapping-section').hidden) return;
-    const counts = new Map(colorUsage(project.cells, project.palette).map(item => [item.color, item.count]));
-    const rows = [...yarnMatch.mapping].sort((a, b) => (counts.get(b[0]) || 0) - (counts.get(a[0]) || 0));
+    renderYarnColors(list, colorUsage(project.cells, project.palette), yarnMatch);
+}
+
+function renderYarnColors(list, usage, matchResult = null, showCounts = false) {
+    list.replaceChildren();
+    const counts = new Map(usage.map(item => [item.color, item.count]));
+    const rows = matchResult ? [...matchResult.mapping] : usage.map(item => [item.color, null]);
+    rows.sort((a, b) => (counts.get(b[0]) || 0) - (counts.get(a[0]) || 0));
     for (const [color, match] of rows) {
         const item = document.createElement('li');
-        const arrow = document.createElement('span');
-        arrow.textContent = '\u2192';
-        const yarn = document.createElement('span');
-        yarn.className = 'yarn-source';
-        yarn.textContent = match.line ? `${match.line} \u00b7 ${match.yarn}` : match.yarn;
-        const score = document.createElement('span');
-        score.className = 'yarn-match-score';
-        if (match.score < USABLE_SCORE) score.classList.add('weak');
-        score.textContent = match.shared && !match.line ? 'no free yarn' : `${Math.round(match.score)}`;
-        score.title = match.shared && !match.line
-            ? 'This line has fewer yarns than your pattern has distinct colors, so this color reuses its nearest yarn.'
-            : `Match score ${Math.round(match.score)} of 100`;
-        item.title = `${color} \u2192 ${match.line ? `${match.line} ` : ''}${match.yarn}`;
-        item.append(swatchChip(color), arrow, swatchChip(match.yarn), yarn, score);
+        item.append(swatchChip(color));
+        if (!match) {
+            const label = document.createElement('span');
+            label.className = 'yarn-source';
+            label.textContent = color;
+            item.append(label);
+        } else {
+            const arrow = document.createElement('span');
+            arrow.textContent = '\u2192';
+            const yarn = document.createElement('span');
+            yarn.className = 'yarn-source';
+            yarn.textContent = match.line ? `${match.line} \u00b7 ${match.yarn}` : match.yarn;
+            const score = document.createElement('span');
+            score.className = 'yarn-match-score';
+            if (match.score < USABLE_SCORE) score.classList.add('weak');
+            score.textContent = match.shared && !match.line ? 'no free yarn' : `${Math.round(match.score)}`;
+            score.title = match.shared && !match.line
+                ? 'This line has fewer yarns than your pattern has distinct colors, so this color reuses its nearest yarn.'
+                : `Match score ${Math.round(match.score)} of 100`;
+            item.title = `${color} \u2192 ${match.line ? `${match.line} ` : ''}${match.yarn}`;
+            item.append(arrow, swatchChip(match.yarn), yarn, score);
+        }
+        if (showCounts) {
+            const count = document.createElement('span');
+            count.className = 'yarn-stitches';
+            count.textContent = `${(counts.get(color) || 0).toLocaleString()} stitches`;
+            item.append(count);
+        }
         list.append(item);
     }
 }
 
-function yarnOption(result, rankLabel, detailText) {
+function yarnOption(result, rankLabel, detailText, onSelect = name => setYarnLine(yarnLine?.name === name ? '' : name), activeName = yarnLine?.name) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'yarn-option';
     button.dataset.line = result.name;
-    button.setAttribute('aria-pressed', String(yarnLine?.name === result.name));
+    button.setAttribute('aria-pressed', String(activeName === result.name));
     const rank = document.createElement('span');
     rank.className = 'yarn-rank';
     rank.textContent = rankLabel;
@@ -442,7 +463,7 @@ function yarnOption(result, rankLabel, detailText) {
         strip.append(part);
     }
     button.append(rank, name, score, detail, strip);
-    button.addEventListener('click', () => setYarnLine(yarnLine?.name === result.name ? '' : result.name));
+    button.addEventListener('click', () => onSelect(result.name));
     return button;
 }
 
@@ -511,12 +532,14 @@ $('yarn-line').addEventListener('change', () => setYarnLine($('yarn-line').value
 function layoutCanvas() {
     const wrap = $('canvas-wrap');
     const workspace = $('workspace');
-    const fit = Math.min((workspace.clientWidth - 48) / project.width, (workspace.clientHeight - 48) / project.height);
+    const pad = rulerPadding();
+    const fit = Math.min((workspace.clientWidth - pad.x * 2) / project.width, (workspace.clientHeight - pad.y * 2) / project.height);
     if (fit <= 0) return null;
     const width = Math.max(1, Math.floor(project.width * fit * zoom));
     const height = Math.max(1, Math.floor(project.height * fit * zoom));
-    wrap.style.width = `${Math.max(workspace.clientWidth, width + 48)}px`;
-    wrap.style.height = `${Math.max(workspace.clientHeight, height + 48)}px`;
+    wrap.style.padding = `${pad.y}px ${pad.x}px`;
+    wrap.style.width = `${Math.max(workspace.clientWidth, width + pad.x * 2)}px`;
+    wrap.style.height = `${Math.max(workspace.clientHeight, height + pad.y * 2)}px`;
     // Keep the display bitmap bounded on large monitors; CSS zoom and hit testing remain exact.
     const dpr = Math.min(devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
     canvas.style.width = `${width}px`;
@@ -528,7 +551,7 @@ function render({ paint = true } = {}) {
     $('sample-preview').hidden = true;
     clearTimeout(zoomSettleTimer);
     zoomSettleTimer = 0;
-    if (!project || !largeScreen.matches) return;
+    if (!project || !largeScreen.matches) { drawRulers(); return; }
     const size = layoutCanvas();
     if (!size) return;
     const { bitmapWidth, bitmapHeight } = size;
@@ -543,6 +566,111 @@ function render({ paint = true } = {}) {
     drawnCursor = cursorVisible();
     renderCrop();
     placement.render();
+    drawRulers();
+}
+
+// Row and column numbers framing the grid, in knitting-chart order: columns count right to left and
+// rows bottom to top, with odd rows labelled on the right and even rows on the left. Each band hugs
+// the grid and sticks to the edge of the viewport once the grid extends past it, and the label size
+// follows the on-screen cell size so it scales with zoom.
+const rulers = $('rulers');
+const rulerContext = rulers.getContext('2d');
+const RULER_FONT_MIN = 8, RULER_FONT_MAX = 13, RULER_GAP = 6;
+const RULER_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 250, 500];
+const rulerFont = size => `600 ${size}px system-ui, sans-serif`;
+
+function rulerSideWidth(size) {
+    rulerContext.font = rulerFont(size);
+    return Math.ceil(rulerContext.measureText(String(project.rows)).width) + RULER_GAP * 2;
+}
+
+// Room around the grid for the largest bands, so scrolling to an edge never leaves labels over cells.
+function rulerPadding() {
+    return { x: Math.max(24, rulerSideWidth(RULER_FONT_MAX) + 2), y: Math.max(24, RULER_FONT_MAX + RULER_GAP + 2) };
+}
+
+function drawRulers() {
+    const workspace = $('workspace');
+    const show = Boolean(project) && !crop && largeScreen.matches && !$('canvas-wrap').hidden && canvas.width > 0;
+    rulers.hidden = !show;
+    if (!show) return;
+    const area = rulers.offsetParent || rulers.parentElement;
+    const view = workspace.getBoundingClientRect(), areaRect = area.getBoundingClientRect();
+    const left = view.left + workspace.clientLeft, top = view.top + workspace.clientTop;
+    const width = workspace.clientWidth, height = workspace.clientHeight;
+    rulers.style.left = `${left - areaRect.left - area.clientLeft}px`;
+    rulers.style.top = `${top - areaRect.top - area.clientTop}px`;
+    rulers.style.width = `${width}px`;
+    rulers.style.height = `${height}px`;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    if (rulers.width !== Math.round(width * dpr) || rulers.height !== Math.round(height * dpr)) {
+        rulers.width = Math.round(width * dpr);
+        rulers.height = Math.round(height * dpr);
+    }
+    const ctx = rulerContext;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    const grid = canvas.getBoundingClientRect();
+    const gx = grid.left - left, gy = grid.top - top, gw = grid.width, gh = grid.height;
+    if (!gw || !gh) return;
+    const cellW = gw / project.cols, cellH = gh / project.rows;
+    const size = Math.round(Math.max(RULER_FONT_MIN, Math.min(RULER_FONT_MAX, 6 + Math.min(cellW, cellH) * 0.25)));
+    const bandH = size + RULER_GAP, bandW = rulerSideWidth(size);
+    ctx.font = rulerFont(size);
+    const topY = Math.max(0, gy - bandH), bottomY = Math.min(height - bandH, gy + gh);
+    const leftX = Math.max(0, gx - bandW), rightX = Math.min(width - bandW, gx + gw);
+    // Visible part of the grid; nothing to frame when it is scrolled fully out of view.
+    const x0 = Math.max(0, gx), x1 = Math.min(width, gx + gw), y0 = Math.max(0, gy), y1 = Math.min(height, gy + gh);
+    if (x1 <= x0 || y1 <= y0) return;
+
+    ctx.fillStyle = 'rgba(8, 16, 10, 0.9)';
+    ctx.fillRect(leftX, topY, rightX + bandW - leftX, bandH);
+    ctx.fillRect(leftX, bottomY, rightX + bandW - leftX, bandH);
+    ctx.fillRect(leftX, topY, bandW, bottomY + bandH - topY);
+    ctx.fillRect(rightX, topY, bandW, bottomY + bandH - topY);
+    ctx.strokeStyle = 'rgba(241, 218, 168, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(leftX + bandW - 0.5, topY + bandH - 0.5, rightX - leftX - bandW + 1, bottomY - topY - bandH + 1);
+    ctx.fillStyle = '#f1daa8';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Columns: label every column when they fit, otherwise every Nth with N a round number.
+    const colNeed = ctx.measureText(String(project.cols)).width + 4;
+    const colStep = RULER_STEPS.find(step => step * cellW >= colNeed) ?? RULER_STEPS.at(-1);
+    const clipL = leftX + bandW, clipR = rightX;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(clipL, 0, Math.max(0, clipR - clipL), height);
+    ctx.clip();
+    const firstCol = Math.max(0, Math.floor((clipL - gx) / cellW)), lastCol = Math.min(project.cols - 1, Math.ceil((clipR - gx) / cellW));
+    for (let c = firstCol; c <= lastCol; c++) {
+        const number = project.cols - c;
+        if (number % colStep) continue;
+        const x = gx + (c + 0.5) * cellW;
+        ctx.fillText(String(number), x, topY + bandH / 2 + 0.5);
+        ctx.fillText(String(number), x, bottomY + bandH / 2 + 0.5);
+    }
+    ctx.restore();
+
+    // Rows: alternate sides (odd right, even left) while two rows fit a label, else every Nth on both.
+    const rowNeed = size + 2;
+    const alternate = cellH * 2 >= rowNeed;
+    const rowStep = alternate ? 1 : RULER_STEPS.find(step => step * cellH >= rowNeed) ?? RULER_STEPS.at(-1);
+    const clipT = topY + bandH, clipB = bottomY;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, clipT, width, Math.max(0, clipB - clipT));
+    ctx.clip();
+    const firstRow = Math.max(0, Math.floor((clipT - gy) / cellH)), lastRow = Math.min(project.rows - 1, Math.ceil((clipB - gy) / cellH));
+    for (let r = firstRow; r <= lastRow; r++) {
+        const number = project.rows - r;
+        if (number % rowStep) continue;
+        const y = gy + (r + 0.5) * cellH + 0.5;
+        if (!alternate || number % 2 === 0) ctx.fillText(String(number), leftX + bandW / 2, y);
+        if (!alternate || number % 2 === 1) ctx.fillText(String(number), rightX + bandW / 2, y);
+    }
+    ctx.restore();
 }
 
 // Only the tiles near the viewport are painted on a full render; the rest are painted as they
@@ -769,7 +897,7 @@ async function activate(data) {
     return true;
 }
 
-async function newFromImage(image, name) {
+function imageReference(image) {
     const size = Math.min(1, MAX_SIDE / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
     const width = Math.max(1, Math.round((image.naturalWidth || image.width) * size));
     const height = Math.max(1, Math.round((image.naturalHeight || image.height) * size));
@@ -777,6 +905,11 @@ async function newFromImage(image, name) {
     thumbnail.width = width;
     thumbnail.height = height;
     thumbnail.getContext('2d').drawImage(image, 0, 0, width, height);
+    return thumbnail;
+}
+
+async function newFromImage(image, name) {
+    const thumbnail = imageReference(image), { width, height } = thumbnail;
     const { cols, rows } = gridDimensions(width, height, 50);
     const activated = await activate({
         version: 1, id: crypto.randomUUID(), name: name.slice(0, 80) || 'Untitled pattern',
@@ -786,6 +919,7 @@ async function newFromImage(image, name) {
     if (!activated) return;
     changed();
     notify('Your reference is ready. Add a color or use Color sampler, then choose Paint. The reference is never included in exports.');
+    return true;
 }
 
 function addPaletteColor(color) {
@@ -912,7 +1046,7 @@ canvas.addEventListener('pointerdown', event => {
 });
 canvas.addEventListener('pointermove', event => {
     if (project && !crop && largeScreen.matches && tool === 'sample') {
-        previewSample(event);
+        if (!spaceHeld && !pan) previewSample(event);
         return;
     }
     if (!stroke || stroke.id !== event.pointerId || tool === 'fill') return;
@@ -931,6 +1065,7 @@ canvas.addEventListener('pointerleave', () => { $('sample-preview').hidden = tru
 $('workspace').addEventListener('scroll', () => {
     $('sample-preview').hidden = true;
     paintVisibleTiles();
+    drawRulers();
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, finishStroke);
 canvas.addEventListener('pointerup', event => {
@@ -966,19 +1101,66 @@ function inWorkspaceViewport(event) {
         event.clientY >= top && event.clientY < top + workspace.clientHeight;
 }
 
+function startPan(event) {
+    const workspace = $('workspace');
+    pan = { id: event.pointerId, x: event.clientX, y: event.clientY, left: workspace.scrollLeft, top: workspace.scrollTop };
+    workspace.setPointerCapture(event.pointerId);
+    workspace.classList.add('panning');
+}
+
 $('workspace').addEventListener('pointerdown', event => {
     if (!project || crop || tool !== 'move' || !largeScreen.matches || pan || event.button !== 0 || !event.isPrimary) return;
-    const workspace = $('workspace');
     if (!inWorkspaceViewport(event)) return;
     event.preventDefault();
     pointerFocus = true;
     canvas.focus({ preventScroll: true });
     pointerFocus = false;
     keyboardFocus = false;
-    pan = { id: event.pointerId, x: event.clientX, y: event.clientY, left: workspace.scrollLeft, top: workspace.scrollTop };
-    workspace.setPointerCapture(event.pointerId);
-    workspace.classList.add('panning');
+    startPan(event);
 });
+
+// Holding Space pans with any tool, like Move. Capturing here keeps the press away from the canvas,
+// placement handles, and click-away, so it never paints or finalizes a line, shape, or paste.
+let spaceHeld = false, pointerOverWorkspace = false;
+function setSpaceHeld(value) {
+    spaceHeld = value;
+    $('workspace').classList.toggle('space-pan', value);
+    if (value) $('sample-preview').hidden = true;
+}
+$('workspace').addEventListener('pointerenter', () => { pointerOverWorkspace = true; });
+$('workspace').addEventListener('pointerleave', () => { pointerOverWorkspace = false; });
+$('workspace').addEventListener('pointerdown', event => {
+    if (!spaceHeld || !project || crop || !largeScreen.matches || pan || stroke || event.button !== 0 || !event.isPrimary) return;
+    if (!inWorkspaceViewport(event)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    startPan(event);
+}, true);
+document.addEventListener('keydown', event => {
+    if (event.key !== ' ' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    if (spaceHeld) {
+        // Swallow auto-repeat so a held Space never activates a focused button or paints.
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+    }
+    if (!project || crop || !largeScreen.matches || document.querySelector('dialog[open]')) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
+    const inWorkspace = target instanceof Element && Boolean(target.closest('#workspace'));
+    if (!pointerOverWorkspace && !inWorkspace) return;
+    // Keyboard-cursor users keep Space for painting or sampling the focused cell.
+    if (keyboardFocus && target === canvas) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setSpaceHeld(true);
+}, true);
+document.addEventListener('keyup', event => {
+    if (event.key !== ' ' || !spaceHeld) return;
+    event.preventDefault();
+    setSpaceHeld(false);
+}, true);
+window.addEventListener('blur', () => setSpaceHeld(false));
 $('workspace').addEventListener('pointermove', event => {
     if (!pan || event.pointerId !== pan.id) return;
     event.preventDefault();
@@ -1046,7 +1228,7 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     updateControls();
     render();
     if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
-    if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. Choose Paint to resume drawing.');
+    if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. With any tool, hold Space and drag to pan. Choose Paint to resume drawing.');
     if (['line', 'shape', 'select'].includes(tool)) notify(tool === 'select'
         ? 'Drag a selection on the grid, then Copy or Cut and Paste.'
         : 'Drag to draw. Adjust handles and palette color, then click away or Apply to finalize.');
@@ -1080,7 +1262,7 @@ action('paste', () => placement.paste());
 // Click-away finalizes a placement only inside the pixel-grid viewport. The canvas itself is handled by
 // placement.begin; scrollbars and controls outside the viewport leave it editable.
 $('workspace').addEventListener('pointerdown', event => {
-    if (!placement.active || event.button !== 0 || !event.isPrimary ||
+    if (!placement.active || spaceHeld || pan || event.button !== 0 || !event.isPrimary ||
         event.target.closest('#canvas-stage') || !inWorkspaceViewport(event)) return;
     placement.commit();
 }, true);
@@ -1125,6 +1307,7 @@ function setZoom(value, anchor) {
     workspace.scrollLeft += next.left + centerX * next.width - anchorX;
     workspace.scrollTop += next.top + centerY * next.height - anchorY;
     paintVisibleTiles();
+    drawRulers();
     if (full) return;
     clearTimeout(zoomSettleTimer);
     zoomSettleTimer = setTimeout(render, ZOOM_SETTLE_MS);
@@ -1565,20 +1748,134 @@ action('delete-color', () => {
     if (!selected) $('new-color').focus({ preventScroll: true });
 });
 
-action('upload', () => { $('image-file').click(); });
-action('new-project', () => { $('image-file').click(); });
+const importPreview = createImportPreview({
+    loadLines: loadYarnLines, yarnOption, renderYarnColors,
+    confirm: async ({ source, name, result, yarn }) => {
+        if (!(await activate({
+            version: 1, id: crypto.randomUUID(), name: name.slice(0, 80) || 'Untitled pattern',
+            width: source.width, height: source.height, reference: source.toDataURL('image/png'),
+            cols: result.cols, rows: result.rows, palette: result.palette, cells: result.cells,
+            updatedAt: Date.now(),
+        }))) return false;
+        if (yarn) setYarnLine(yarn);
+        changed();
+        notify(`Created ${result.cols} x ${result.rows} editable cells with ${result.palette.length} colors. Your reference and estimated colors are preserved.`);
+        return true;
+    },
+});
+let imageUploadGeneration = 0;
+$('new-dialog').addEventListener('close', () => { imageUploadGeneration++; });
+const newProjectTabs = [$('blank-tab'), $('image-tab')];
+function selectNewProjectTab(tab) {
+    for (const button of newProjectTabs) {
+        const active = button === tab;
+        button.setAttribute('aria-selected', String(active));
+        button.tabIndex = active ? 0 : -1;
+        $(button.getAttribute('aria-controls')).hidden = !active;
+    }
+    importPreview.updateDialogWidth();
+    $('new-dialog').querySelector('.dialog-message').textContent = '';
+}
+for (const tab of newProjectTabs) {
+    tab.addEventListener('click', () => selectNewProjectTab(tab));
+    tab.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? newProjectTabs[0]
+            : event.key === 'End' ? newProjectTabs[1]
+            : newProjectTabs[1 - newProjectTabs.indexOf(tab)];
+        selectNewProjectTab(next);
+        next.focus();
+    });
+}
+function openNewProject() {
+    $('project-dialog').close();
+    importPreview.reset();
+    selectNewProjectTab($('blank-tab'));
+    $('new-dialog').showModal();
+}
+action('upload', openNewProject);
+action('new-project', openNewProject);
+action('new-image', () => { $('image-file').click(); });
+$('blank-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = event.submitter;
+    button.disabled = true;
+    try {
+        const cols = Number($('blank-cols').value), rows = Number($('blank-rows').value);
+        if (![cols, rows].every(value => Number.isInteger(value) && value >= 1 && value <= MAX_SIDE)) {
+            throw new Error(`Choose whole numbers from 1 to ${MAX_SIDE} for columns and rows.`);
+        }
+        // A transparent backing keeps blank projects compatible with existing backups and board transforms.
+        const backing = document.createElement('canvas');
+        backing.width = cols;
+        backing.height = rows;
+        if (!(await activate({
+            version: 1, id: crypto.randomUUID(), name: 'Untitled pattern',
+            width: cols, height: rows, cols, rows, blank: true,
+            reference: backing.toDataURL('image/png'), palette: [],
+            cells: Array(cols * rows).fill(null), updatedAt: Date.now(),
+        }))) return;
+        $('new-dialog').close();
+        changed();
+        notify('Your blank canvas is ready. Add a palette color to start painting.');
+    } catch (error) {
+        $('new-dialog').querySelector('.dialog-message').textContent = error.message;
+    } finally { button.disabled = false; }
+});
+action('back-projects', async () => {
+    if (!(await protectUnsaved())) return;
+    clearTimeout(timer);
+    clearTimeout(zoomSettleTimer);
+    setSpaceHeld(false);
+    exitCrop();
+    placement.cancel();
+    if (yarnLine) setYarnLine('');
+    project = null;
+    reference = null;
+    history = [];
+    future = [];
+    dirty = false;
+    revision++;
+    selected = null;
+    paintedTiles = null;
+    $('canvas-wrap').hidden = true;
+    $('empty').hidden = false;
+    $('workspace').classList.remove('editing', 'moving');
+    $('workspace').scrollTo(0, 0);
+    $('name').value = 'Untitled pattern';
+    $('dimensions').textContent = 'No pattern open';
+    $('save-state').textContent = 'Stored only in this browser';
+    updateControls();
+    renderPalette();
+    render();
+    await renderHome();
+    $('upload').focus({ preventScroll: true });
+    notify('Choose a project or create a new one.');
+});
 $('image-file').addEventListener('change', async event => {
     const file = event.target.files[0];
     event.target.value = '';
     if (!file) return;
+    const upload = ++imageUploadGeneration, estimate = $('estimate-image').checked;
+    importPreview.reset();
     let url;
     try {
         if (file.size > 20 * 1024 * 1024) throw new Error('Choose an image smaller than 20 MB.');
         if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type)) throw new Error('Choose a PNG, JPEG, WebP, or GIF image.');
         url = URL.createObjectURL(file);
         const image = await decodeImage(url);
-        await newFromImage(image, file.name.replace(/\.[^.]+$/, ''));
-    } catch (error) { report(error); }
+        if (upload !== imageUploadGeneration || !$('new-dialog').open) return;
+        if (estimate && $('estimate-image').checked) {
+            importPreview.start(imageReference(image), file.name.replace(/\.[^.]+$/, ''));
+            return;
+        }
+        if (await newFromImage(image, file.name.replace(/\.[^.]+$/, ''))) $('new-dialog').close();
+    } catch (error) {
+        if (upload !== imageUploadGeneration || !$('new-dialog').open) return;
+        if ($('new-dialog').open) $('new-dialog').querySelector('.dialog-message').textContent = error.message;
+        report(error);
+    }
     finally { if (url) URL.revokeObjectURL(url); }
 });
 action('demo', async () => {

@@ -1,7 +1,7 @@
 // Perceptive color comparison, not simply looking at the closest hex values
 // Values determined by "Oklab perceptual color distance"
 
-function toOklab(hex) {
+export function toOklab(hex) {
     if (typeof hex !== 'string' || !/^#[0-9a-f]{6}$/i.test(hex)) {
         throw new Error('Colors must be six-digit hex values such as #123456.');
     }

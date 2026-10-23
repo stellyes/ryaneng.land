@@ -659,7 +659,9 @@ input[type="color"] {
   font-size: 13px;
 }
 #yarn-ranking,
-#yarn-mapping {
+#yarn-mapping,
+#import-ranking,
+#import-mapping {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -716,13 +718,15 @@ input[type="color"] {
 #yarn-custom-section .fine {
   margin-bottom: 0;
 }
-#yarn-mapping li {
+#yarn-mapping li,
+#import-mapping li {
   display: flex;
   align-items: center;
   gap: 6px;
   font: 11px monospace;
 }
-#yarn-mapping .yarn-source {
+#yarn-mapping .yarn-source,
+#import-mapping .yarn-source {
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -732,10 +736,12 @@ input[type="color"] {
   height: 18px;
   border: 1px solid #fff;
 }
-#yarn-mapping .yarn-match-score {
+#yarn-mapping .yarn-match-score,
+#import-mapping .yarn-match-score {
   margin-left: auto;
 }
-#yarn-mapping .weak {
+#yarn-mapping .weak,
+#import-mapping .weak {
   color: #e0a080;
 }
 .export-yarn {
@@ -795,6 +801,28 @@ input[type="color"] {
 #workspace.moving,
 #workspace.moving canvas {
   cursor: grab;
+}
+/* Holding Space pans with any tool; override tool, handle, and sampler cursors while it is held. */
+#workspace.space-pan,
+#workspace.space-pan * {
+  cursor: grab !important;
+}
+#workspace.space-pan.panning,
+#workspace.space-pan.panning * {
+  cursor: grabbing !important;
+}
+/* Row/column numbers pinned to the visible frame of the grid; positioned and drawn by app.js. */
+#rulers {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  box-shadow: none;
+  background: none;
+  image-rendering: auto;
+  touch-action: auto;
+}
+#rulers[hidden] {
+  display: none;
 }
 #workspace.panning,
 #workspace.panning canvas {
@@ -901,7 +929,6 @@ input[type="color"] {
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, #000e 0, #000b 38%, #0003 100%);
-  transition: opacity 0.15s;
 }
 .row-open:hover .row-art::after,
 .row-open:focus-visible .row-art::after {
@@ -1140,18 +1167,140 @@ dialog label {
 #export-dialog * {
   margin-bottom: 0.5em;
 }
+#new-dialog,
 #extend-dialog {
   width: min(400px, 90vw);
 }
+.new-tabs {
+  display: flex;
+  gap: 6px;
+  margin-block: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.new-tabs [role="tab"] {
+  flex: 1;
+}
+.new-tabs [aria-selected="true"] {
+  background: var(--accent);
+  color: var(--paper);
+}
+#image-panel {
+  padding-block: 16px;
+}
+#blank-form button[type="submit"],
+#new-image {
+  display: block;
+  margin-inline: auto;
+}
+#new-dialog label,
 #extend-dialog label {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
 }
+#new-dialog input,
 #extend-dialog input,
 #extend-dialog select {
   width: 150px;
+}
+#new-dialog input[type="checkbox"] {
+  width: auto;
+}
+#new-dialog label.check {
+  justify-content: flex-start;
+}
+#new-dialog.has-approximation {
+  width: min(1100px, 94vw);
+}
+.import-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.8fr);
+  align-items: start;
+  gap: 24px;
+  margin-top: 20px;
+}
+.import-images {
+  position: sticky;
+  top: 0;
+}
+.import-images figure {
+  margin: 0 0 16px;
+}
+.import-images figcaption {
+  margin-bottom: 6px;
+}
+.import-images canvas {
+  max-width: 100%;
+  width: 100%;
+  height: 30dvh;
+  max-height: 30dvh;
+  margin-inline: auto;
+  object-fit: contain;
+  cursor: default;
+  background: transparent;
+  box-shadow: none;
+}
+#import-source {
+  image-rendering: auto;
+}
+.import-settings fieldset {
+  min-width: 0;
+  margin: 0 0 16px;
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+#new-dialog .import-settings input[type="number"] {
+  width: 65px;
+}
+#new-dialog .import-settings input[type="range"] {
+  flex: 1;
+  min-width: 30px;
+  width: 60px;
+}
+.import-settings label,
+.import-settings p {
+  font-size: 12px;
+}
+.import-settings output {
+  min-width: 24px;
+  text-align: right;
+}
+#import-yarn {
+  width: 100%;
+  min-width: 0;
+}
+#new-dialog label[for="import-yarn"] {
+  display: block;
+}
+#import-mapping li {
+  flex-wrap: wrap;
+}
+#import-mapping .yarn-source {
+  flex: 1;
+}
+.yarn-stitches {
+  flex-basis: 100%;
+  color: var(--muted);
+  text-align: right;
+}
+#import-confirm {
+  display: block;
+  margin: 20px auto 0;
+}
+@media (max-width: 850px) {
+  .import-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .import-images {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  #import-status {
+    grid-column: 1 / -1;
+  }
 }
 .project-row {
   display: flex;

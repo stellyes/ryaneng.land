@@ -167,7 +167,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         $('box-hit').style.display = isLine ? 'none' : '';
         $('object-help').textContent = object.kind === 'selection'
             ? 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
-            : 'Drag handles to adjust; drag inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape cancels. Content outside the grid is clipped.';
+            : 'Drag handles to adjust; drag inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape or Delete cancels. Content outside the grid is clipped.';
         for (const button of overlay.querySelectorAll('button')) button.hidden = true;
         if (isLine) {
             const a = { x: object.a.x + 0.5, y: object.a.y + 0.5 }, b = { x: object.b.x + 0.5, y: object.b.y + 0.5 };
@@ -256,7 +256,12 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             notify('Selected pixels deleted to transparency. Undo restores them. The clipboard is unchanged.');
             return true;
         }
-        if (event.key === 'Escape') { event.preventDefault(); cancel(); return true; }
+        // Mac keyboards label Backspace "delete", so both discard a floating line, shape, or paste.
+        if (event.key === 'Escape' || (object.kind !== 'selection' && (event.key === 'Delete' || event.key === 'Backspace'))) {
+            event.preventDefault();
+            cancel();
+            return true;
+        }
         if (event.key === 'Enter' && (event.target === canvas || event.target.closest('#object-overlay'))) {
             event.preventDefault();
             commit();

@@ -9,6 +9,7 @@ import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mir
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
 import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
 import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth } from '../tools/pattern-studio/objects.js';
+import { approximateGrid, approximationDimensions } from '../tools/pattern-studio/approximation.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -22,6 +23,84 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    const pixels = colors => Uint8ClampedArray.from(colors.flatMap(color => color === null
+        ? [0, 0, 0, 0] : [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16), 255]));
+    const stripes = ['#550000', '#990000', '#dd0000', '#ff5555'].flatMap(color => Array(20).fill(color));
+    const shadeSettings = { rgba: pixels(stripes), cols: 20, rows: 4, colors: 8, merge: 3, blocks: 0 };
+    const shades = approximateGrid(shadeSettings);
+    assert(shades.palette.length === 4 && stripes.every((color, i) => shades.cells[i] === color),
+        'Approximation keeps four distinct red shades rather than flattening a hue');
+    assert(JSON.stringify(shades) === JSON.stringify(approximateGrid(shadeSettings)), 'Approximation is deterministic');
+    const nearColors = { rgba: pixels(['#cc1111', '#ce1212', '#cc1111', '#ce1212']), cols: 4, rows: 1, colors: 4, blocks: 0 };
+    assert(approximateGrid({ ...nearColors, merge: 3 }).palette.length === 1, 'Nearly identical image shades collapse into one color');
+    const limited = approximateGrid({ ...shadeSettings, colors: 2 });
+    assert(limited.palette.length <= 2 && limited.cells.length === 80 && limited.cells.every(c => limited.palette.includes(c)),
+        'Approximation respects the hard color limit and complete grid shape');
+    const transparent = approximateGrid({ rgba: new Uint8ClampedArray([255, 0, 0, 0, 0, 0, 0, 128]), cols: 2, rows: 1, blocks: 0 });
+    assert(transparent.cells[0] === null && transparent.cells[1] === '#7f7f7f' && transparent.usage[0].count === 1,
+        'Transparent cells remain empty and partial alpha composites over white');
+    const dot = Array(25).fill('#000000'); dot[12] = '#ffffff';
+    const isolated = { rgba: pixels(dot), cols: 5, rows: 5, colors: 2 };
+    assert(approximateGrid({ ...isolated, blocks: 0 }).cells[12] === '#ffffff' &&
+        approximateGrid({ ...isolated, blocks: 2 }).cells.every(c => c === '#000000'), 'Block cleanup removes an isolated stitch and can be disabled');
+    const rare = approximateGrid({ ...isolated, blocks: 0, minimum: 2 });
+    assert(rare.palette.length === 1 && rare.usage[0].count === 25, 'Minimum color usage reallocates a rare color to a common one');
+    const solid = approximateGrid({ rgba: pixels(Array(16).fill('#2468ac')), cols: 4, rows: 4, colors: 32 });
+    assert(solid.palette.length === 1 && solid.palette[0] === '#2468ac', 'Uniform images do not invent extra palette colors');
+    assert(shades.usage.reduce((sum, color) => sum + color.count, 0) === 80, 'Stitch counts equal the number of painted cells');
+    assert(approximationDimensions(500, 250, 200).rows === 100 &&
+        approximationDimensions(250, 500, 500).cols === 250, 'Grid dimensions preserve image proportions and enforce the longest-edge cap');
+    const sizeFromRows = approximationDimensions(240, 180, 76, 'rows');
+    assert(sizeFromRows.cols === 101 && sizeFromRows.rows === 76, 'Height controls derive a consistent aspect-locked grid');
+    rejects(() => approximateGrid({ rgba: pixels([null]), cols: 1, rows: 1 }), 'Fully transparent approximation reports an explicit error');
+    for (const bad of [{ colors: 33 }, { cols: 501 }, { colors: 1.5 }, { blocks: -1 }, { merge: 11 }, { rgba: [] }]) {
+        rejects(() => approximateGrid({ ...shadeSettings, ...bad }), 'Invalid approximation setting rejected: ' + Object.keys(bad)[0]);
+    }
+    rejects(() => approximationDimensions(100, 100, 0), 'Invalid approximation dimensions rejected');
+    const brightened = approximateGrid({ rgba: pixels(['#808080']), cols: 1, rows: 1, brightness: 20 });
+    assert(brightened.palette[0] === '#b3b3b3', 'Brightness controls apply before quantization');
+    const approximationWorker = new Worker('../tools/pattern-studio/approximation-worker.js', { type: 'module' });
+    try {
+        const workerResult = await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Approximation worker timed out.')), 10000);
+            approximationWorker.onmessage = event => { clearTimeout(timeout); resolve(event.data); };
+            approximationWorker.onerror = event => { clearTimeout(timeout); reject(new Error(event.message)); };
+            approximationWorker.postMessage(shadeSettings);
+        });
+        assert(JSON.stringify(workerResult.result) === JSON.stringify(shades), 'Worker output matches the pure approximation algorithm');
+    } finally { approximationWorker.terminate(); }
+    const chartImage = new Image();
+    chartImage.src = '../tools/pattern-studio/feature-reference/3EB%20-%20Cover%20-%20Stitch%20Fiddle.png';
+    await chartImage.decode();
+    const chartSource = document.createElement('canvas');
+    chartSource.width = chartSource.height = 500;
+    chartSource.getContext('2d').drawImage(chartImage, 0, 0, 500, 500);
+    const chartSample = size => {
+        const sample = document.createElement('canvas');
+        sample.width = sample.height = size;
+        const ctx = sample.getContext('2d');
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(chartSource, 0, 0, size, size);
+        return ctx.getImageData(0, 0, size, size).data;
+    };
+    const chartAnalysis = chartSample(100);
+    for (const size of [100, 200, 500]) {
+        for (const colors of [6, 16, 32]) {
+            const chart = approximateGrid({ rgba: chartSample(size), analysisRgba: chartAnalysis, cols: size, rows: size, colors });
+            const reds = chart.palette.filter(color => {
+                const r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16);
+                return r > 80 && g < r * 0.3;
+            });
+            const yellow = chart.palette.some(color => {
+                const [r, g, b] = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16));
+                return r > 150 && g > r * 0.5 && b < g * 0.5;
+            });
+            assert(chart.palette.length === 6 && reds.length === 3 && yellow &&
+                colorDistance('#000000', findClosestColor('#000000', chart.palette)) < 0.25 &&
+                colorDistance('#ffffff', findClosestColor('#ffffff', chart.palette)) < 0.15,
+                `3EB produces three reds, yellow, black and white at ${size} x ${size} with a ${colors}-color limit`);
+        }
+    }
     const yarnColors = Object.freeze(['#f9f9f9', '#d0cbc7', '#b6acb4', '#fed6d5']);
     assert(findClosestColor('#d0cbc7', yarnColors) === '#d0cbc7', 'Palette matcher returns an exact match');
     assert(findClosestColor('#D0CBC7', yarnColors) === '#d0cbc7', 'Palette matcher accepts uppercase input');
@@ -233,6 +312,8 @@ try {
         reference: 'data:image/png;base64,AAAA', updatedAt: Date.now(),
     };
     assert(validateProject(record) === record, 'Valid project schema accepted');
+    const blankRecord = { ...record, blank: true, palette: [], cells: Array(4).fill(null) };
+    assert(validateProject(blankRecord) === blankRecord, 'Blank projects use the existing project schema');
     rejects(() => validateProject({ ...record, width: 501 }), 'Oversized references rejected');
     rejects(() => validateProject({ ...record, cols: 501 }), 'Oversized grids rejected');
     rejects(() => validateProject({ ...record, cells: [] }), 'Wrong cell count rejected');
@@ -248,6 +329,10 @@ try {
     rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 2, y: 0, width: 2, height: 2 } }), 'Reference outside the board rejected');
     rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 0, y: 0, width: 1.5, height: 2 } }), 'Non-integer reference size rejected');
     store = await openStore(database);
+    await store.run('readwrite', table => table.put(blankRecord));
+    const blankSaved = await store.run('readonly', table => table.get(record.id));
+    assert(blankSaved.blank && blankSaved.cells.every(cell => cell === null) && !blankSaved.palette.length,
+        'Blank project metadata and empty cells survive saving and reopening');
     await store.run('readwrite', table => table.put(record));
     const saved = await store.run('readonly', table => table.get(record.id));
     assert(saved.cells[0] === '#000000' && saved.cells[1] === null && saved.reference === record.reference, 'IndexedDB round trip retains painting, transparency and reference');

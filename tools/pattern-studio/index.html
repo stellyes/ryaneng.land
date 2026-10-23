@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Pattern Studio - Ryan's Code</title>
+  <title>Ryan's Pattern Studio</title>
   <link rel="stylesheet" href="../../style.css">
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -38,6 +38,7 @@
       <details id="file-menu" hidden>
         <summary id="file-toggle">File</summary>
         <div class="file-actions">
+        <button id="back-projects" type="button">Back to projects</button>
         <button id="projects" type="button">Projects</button>
         <button id="backup" type="button" disabled>Download project</button>
         <button id="export" type="button" disabled class="primary">Export pattern</button>
@@ -139,7 +140,7 @@
         <button id="placement-apply" class="primary" disabled>Apply placement</button>
         <button id="placement-cancel" disabled>Cancel</button>
       </div>
-      <p id="object-help">Drag on the grid to start. Adjust handles, then click away or Apply to finalize. Enter applies; Escape cancels.</p>
+      <p id="object-help">Drag on the grid to start. Adjust handles, then click away or Apply to finalize. Enter applies; Escape or Delete cancels.</p>
     </section>
     <section id="grid-settings" class="grid-settings" hidden>
       <label for="grid-number">Cells on longest side</label>
@@ -166,14 +167,14 @@
         <div class="empty-grid" aria-hidden="true"></div>
         <p class="eyebrow">FROM IMAGE TO STITCH</p>
         <h2>Make something, one pixel at a time.</h2>
-        <p>Bring a reference. Pick your threads. Paint your own pattern.</p>
+        <p>Start blank or bring a reference. Pick your threads. Paint your own pattern.</p>
         <section class="recent-projects" aria-labelledby="recent-title">
           <h3 id="recent-title" class="eyebrow">Your projects</h3>
           <ul id="recent-list" class="project-rows">
             <li class="home-row create-row">
-              <button id="upload" class="row-open" type="button" aria-label="Create new project from a reference image">
+              <button id="upload" class="row-open" type="button" aria-label="Create new project">
                 <svg class="row-icon" viewBox="0 0 7 7" aria-hidden="true" shape-rendering="crispEdges"><path d="M3 1h1v2h2v1H4v2H3V4H1V3h2z"/></svg>
-                <span class="row-text"><span class="row-name">Create new</span><span class="row-meta">Start from a reference image</span></span>
+                <span class="row-text"><span class="row-name">Create new</span><span class="row-meta">Blank canvas or reference image</span></span>
               </button>
             </li>
           </ul>
@@ -213,6 +214,7 @@
         </div>
       </div>
     </section>
+    <canvas id="rulers" aria-hidden="true" hidden></canvas>
     <div id="workspace-controls" class="workspace-controls" hidden>
     <div class="workspace-menus">
     <details id="palette-menu">
@@ -272,10 +274,77 @@
   <dialog id="project-dialog" aria-labelledby="projects-title">
     <div class="dialog-heading"><h2 id="projects-title">Your projects</h2><button data-close="project-dialog" aria-label="Close projects">Close</button></div>
     <p>Saved on this browser, on this device. Download a project backup to keep it safe or move it elsewhere. Clearing site data removes browser saves.</p>
-    <div class="project-actions"><button id="new-project" class="primary">New from image</button><button id="import-project">Import project backup</button><button id="save-now">Save now</button></div>
+    <div class="project-actions"><button id="new-project" class="primary">New project</button><button id="import-project">Import project backup</button><button id="save-now">Save now</button></div>
     <div id="project-list"></div>
     <p class="dialog-message" role="status" aria-live="polite"></p>
     <p class="fine">No accounts, AWS, analytics, or cloud image storage. This demo does not send your images anywhere.</p>
+  </dialog>
+  <dialog id="new-dialog" aria-labelledby="new-title">
+    <div class="dialog-heading"><h2 id="new-title">New project</h2><button data-close="new-dialog">Close</button></div>
+    <div class="new-tabs" role="tablist" aria-label="Project starting point">
+      <button id="blank-tab" type="button" role="tab" aria-selected="true" aria-controls="blank-panel">Blank canvas</button>
+      <button id="image-tab" type="button" role="tab" aria-selected="false" aria-controls="image-panel" tabindex="-1">Reference image</button>
+    </div>
+    <div id="blank-panel" role="tabpanel" aria-labelledby="blank-tab">
+    <p>Start with a blank canvas.</p>
+    <form id="blank-form">
+      <label>Columns <input id="blank-cols" type="number" min="1" max="500" step="1" value="50" required></label>
+      <label>Rows <input id="blank-rows" type="number" min="1" max="500" step="1" value="50" required></label>
+      <p class="fine">Dimensions are in cells, from 1 to 500 per side.</p>
+      <button type="submit" class="primary">Create blank canvas</button>
+    </form>
+    </div>
+    <div id="image-panel" role="tabpanel" aria-labelledby="image-tab" hidden>
+    <label class="check"><input id="estimate-image" type="checkbox"> Estimate a painted grid from this image</label>
+    <p class="fine">Optional: preview and reduce colors before creating your project. Unchecked uploads open directly for manual painting.</p>
+    <button id="new-image" type="button">Upload reference image</button>
+    <section id="import-preview" aria-label="Image approximation" hidden>
+      <div class="import-layout">
+        <div class="import-images">
+          <figure><figcaption>Reference</figcaption><canvas id="import-source" aria-label="Uploaded reference"></canvas></figure>
+          <figure><figcaption>Estimated pattern</figcaption><canvas id="import-art" aria-label="Estimated pixel pattern"></canvas></figure>
+          <p id="import-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="import-settings">
+          <fieldset id="import-controls">
+            <legend>Grid size (stitches)</legend>
+            <p class="fine">Image proportions stay locked. Maximum 500 cells on the longest side.</p>
+            <label for="import-cols">Width <input id="import-cols-range" type="range" min="1" max="500" value="100" aria-label="Grid width slider"><input id="import-cols" type="number" min="1" max="500" step="1" value="100"></label>
+            <label for="import-rows">Height <input id="import-rows-range" type="range" min="1" max="500" value="100" aria-label="Grid height slider"><input id="import-rows" type="number" min="1" max="500" step="1" value="100"></label>
+            <p id="import-stitches" class="fine"></p>
+            <label for="import-colors">Maximum colors <input id="import-colors-range" type="range" min="1" max="32" value="16" aria-label="Maximum colors slider"><input id="import-colors" type="number" min="1" max="32" step="1" value="16"></label>
+            <details>
+              <summary>Fine-tune color blocking</summary>
+              <label class="check"><input id="import-simplify" type="checkbox" checked> Reduce blended edge shades</label>
+              <p class="fine">Avoid extra yarns for small shades between established colors. Turn off to preserve subtle edge shading.</p>
+              <label for="import-merge">Merge similar shades <input id="import-merge" type="range" min="0" max="10" value="4"><output for="import-merge" id="import-merge-value">4</output></label>
+              <p class="fine">Higher merges more shades; 0 keeps subtle differences. Distinct light and dark shades can remain separate.</p>
+              <label for="import-blocks">Minimum block size <input id="import-blocks" type="number" min="0" max="20" step="1" value="2"></label>
+              <p class="fine">Replace smaller isolated blocks with their surrounding color. 0 turns this off.</p>
+              <label for="import-minimum">Minimum stitches per color <input id="import-minimum" type="number" min="1" max="1000" step="1" value="1"></label>
+              <label for="import-brightness">Brightness <input id="import-brightness" type="range" min="-50" max="50" value="0"><output for="import-brightness" id="import-brightness-value">0</output></label>
+              <label for="import-contrast">Contrast <input id="import-contrast" type="range" min="-50" max="50" value="0"><output for="import-contrast" id="import-contrast-value">0</output></label>
+              <label class="check"><input id="import-smoothing" type="checkbox" checked> Smooth image when sampling cells</label>
+              <p class="fine">No dithering: colors form solid blocks instead of alternating stitches. Transparent pixels stay unpainted; partial transparency is shown over white.</p>
+            </details>
+          </fieldset>
+          <section aria-label="Estimated yarn palette">
+            <h3>Yarns</h3>
+            <label for="import-yarn">Preview palette <select id="import-yarn"><option value="">Estimated image colors</option></select></label>
+            <p id="import-yarn-status" class="fine" role="status"></p>
+            <button id="import-yarn-retry" type="button" hidden>Retry yarn catalog</button>
+            <div id="import-custom"></div>
+            <strong class="yarn-heading">Top matches</strong>
+            <ol id="import-ranking"></ol>
+            <ul id="import-mapping"></ul>
+            <p class="fine">Counts are stitches, not yarn length. Yarn choices preview colors only; the estimated colors remain editable. Mixed brands may differ in weight and fiber.</p>
+          </section>
+        </div>
+      </div>
+      <button id="import-confirm" type="button" class="primary" disabled>Create editable pattern</button>
+    </section>
+    </div>
+    <p class="dialog-message" role="alert"></p>
   </dialog>
   <dialog id="extend-dialog" aria-labelledby="extend-title">
     <div class="dialog-heading"><h2 id="extend-title">Add columns</h2><button data-close="extend-dialog">Close</button></div>

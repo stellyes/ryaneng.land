@@ -8,6 +8,31 @@ The editor loads the shared site stylesheet for its Warbler/Sabbath Black fonts,
 gold text, forest-green texture, and dark panels. Its compact bottom-right zoom
 controls stay on one row.
 
+- Create new opens a dialog with Blank canvas and Reference image tabs: start
+  a blank canvas with 1-500 columns and rows, or upload a reference image.
+  Use Left/Right arrows or Home/End to switch focused tabs.
+  Blank projects need no image; internally a
+  transparent backing keeps them compatible with existing backups and transforms.
+- In Reference image, **Estimate a painted grid from this image** is opt-in.
+  Leave it unchecked for the original manual-painting flow. Checked uploads
+  stay in the dialog until **Create editable pattern** is confirmed; cancelling
+  does not change or save the open project.
+  - The preview shows the reference and estimated pattern. Width and height
+    sliders/numbers preserve the image ratio, up to 500 cells on the longest
+    side, and show the total stitch count.
+  - Maximum colors is a hard cap of 1-32, not a target: flat images and similar
+    shades may need fewer colors. Fine-tuning includes blended-edge reduction, shade merging, minimum
+    block size, minimum stitches per color, brightness, contrast, and image
+    smoothing. Disable block cleanup to keep single-stitch accents.
+  - Estimated image colors, Custom mix, the top five brand lines, and all other
+    catalog lines are available as previews. Scores, usage weights, distinct
+    yarn assignment, and custom-mix provenance use the editor's existing
+    matcher. The color list includes stitch counts, not yardage.
+  - Confirmation creates painted, manually editable cells while retaining the
+    reference and original estimated colors. A chosen yarn line stays a
+    view-only preview, just as in existing projects. It is not baked into the
+    source colors. A catalog-load error is shown with a Retry button; estimated
+    image colors still work without the catalog.
 - Upload PNG, JPEG, WebP or GIF (20 MB maximum; animated images use a still frame),
   or try the built-in sample. The stored reference is resized to a longest edge
   of at most 500 pixels.
@@ -22,15 +47,17 @@ controls stay on one row.
   the previous panel. The panel scrolls internally when needed and stays put
   while zooming or panning, without resizing the canvas viewport.
 - The start screen lists saved projects in a scrollable menu below the intro,
-  with **Create new** (pick a reference image) at the top and projects newest
+  with **Create new** (blank canvas or reference image) at the top and projects newest
   first. Each row's background is the project preview (painted cells over a
   faded reference) scaled to the row width without stretching, showing the
   horizontal slice with the most painted cells. Click a row to open it; its ⋮
   menu offers Download and Delete. Try a sample and Import project backup are
   below the list.
-- The top-right File dropdown contains Projects, Download project, and Export
+- The top-right File dropdown contains Back to projects, Projects, Download project, and Export
   pattern. It is hidden until a project is open. Selecting an action,
   clicking/tapping outside, or pressing Escape closes the dropdown.
+  Back to projects finalizes pending placements and saves before returning to
+  the start screen. A failed save warns before allowing unsaved work to be discarded.
 - The Canvas dropdown beside File edits the whole pattern; each change is one
   undo step:
   - Add column left/right and Add row above/below add one blank line of cells.
@@ -84,11 +111,12 @@ controls stay on one row.
 - Click away from a floating line/shape/paste inside the pixel-grid viewport
   (on the grid or the empty area around it) to finalize it, or use Apply
   placement. Clicking away on the canvas places it without starting a second
-  drawing on the same click. Scrollbars, zoom, the palette, placement settings,
+  drawing on the same click. Scrollbars, Space-drag panning, zoom, the palette, placement settings,
   and controls outside the viewport leave it adjustable, so you can scroll to
   make edits beyond the visible area (choosing another tool still finalizes
   it). Each finalized placement is one undo step. Cancel,
-  Escape, or Undo while adjusting discards only the preview. Arrow keys move a
+  Escape, Delete/Backspace (for a line, shape, or paste), or Undo while adjusting
+  discards only the preview. Arrow keys move a
   focused placement or adjust a focused handle (Shift moves farther); Enter
   applies when the canvas or a handle is focused. Space/Enter on a grid cell
   starts a keyboard line, shape, or selection with its end/corner handle focused.
@@ -108,6 +136,16 @@ controls stay on one row.
   or a mouse, without painting. Arrow keys pan too (Shift moves farther).
   Move only changes the view, not the pattern or undo history. Choose Paint to
   draw again; touch painting suppresses native scrolling on the canvas.
+- With any tool, hold Space while the pointer is over the canvas window and drag
+  to pan, like Move. It never paints, samples, starts a placement, or counts as a
+  click-away, so a floating line/shape/paste stays adjustable. When the keyboard
+  cell cursor is active on the canvas, Space keeps painting/sampling that cell.
+- Row and column numbers frame the grid in knitting-chart order: columns count
+  right to left and rows bottom to top, with odd rows on the right and even rows
+  on the left. The bands hug the grid and stay pinned to the edges of the canvas
+  window while zoomed in, and the labels grow and shrink with zoom (showing every
+  Nth number when cells are too small to label each one). They are hidden while
+  cropping.
 - New projects start with an empty palette (existing projects keep their colors).
   The collapsible Palette menu overlays the bottom-left inside the canvas window;
   its closed state shows the selected color. Open it to select project colors
@@ -206,6 +244,55 @@ Inputs are case-insensitive `#rrggbb` strings. An empty/missing palette or any
 invalid color throws an explicit error, including invalid entries after an
 exact match. Neither the palette nor the current painting is modified.
 Screen colors are approximations, not a guarantee of a physical yarn match.
+
+## Image approximation
+
+The initial implementation uses [color quantization](https://en.wikipedia.org/wiki/Color_quantization):
+deterministic frequency-weighted farthest seeds followed by eight bounded Lloyd/k-means refinement
+passes in [Oklab](https://bottosson.github.io/posts/oklab/). Perceptual lightness
+and chroma distances distinguish several shades of a hue instead of treating
+all reds or blues as one color. Close clusters are merged at the selected
+Oklab threshold (slider value divided by 100). A five-bit RGB histogram limits
+the work to 32,768 bins, independent of the number of stitches. Palette analysis
+uses a separate thumbnail capped at 100px, so raising stitch resolution adds
+shape detail rather than extra yarns for image grid lines and blended boundaries.
+Disabling blended-edge reduction instead analyzes colors at the selected stitch
+resolution, which can retain smaller accents but require more yarn colors.
+The seed weighting balances frequency against color diversity so small,
+distinct hues such as yellow lettering are not automatically lost to large reds.
+
+With **Reduce blended edge shades** enabled, small clusters (up to 15% of the
+largest cluster's usage) close to a color segment between two established shades
+are reassigned instead of becoming extra yarns. Rare hue extremes are retained.
+This is a conservative heuristic, not semantic understanding: intentional small
+intermediate shades can also be removed, so disable it when those are important.
+The supplied 3EB chart is regression-tested to produce three reds, yellow,
+black, and white at 100, 200, and 500 cells per side, with color caps of 6, 16,
+and 32. The actual matched screen shades remain approximations, not canonical
+hexes or guarantees about physical yarn.
+
+Rare colors can be reassigned to the nearest retained cluster. A separate
+four-connected component pass replaces blocks smaller than the requested
+size with their most common bordering color. It deliberately does not dither:
+dithering can simulate gradients with alternating pixels, but creates more
+isolated yarn changes. This cleanup can also remove small intentional details;
+lower it to 0 to preserve those. It is not semantic object/background detection
+and does not guarantee every region is at least the chosen size after cleanup.
+
+Sampling uses a reference limited to 500px, with optional browser image smoothing.
+Fully transparent sampled cells stay empty; partial transparency is composited
+over white before color reduction. A fully transparent image reports an error.
+Image color clustering runs in a module Web Worker, with debounced controls;
+superseded workers are terminated so a slower result cannot overwrite newer
+settings. No image data leaves the browser. Yarn ranking reuses the cached
+catalog and the existing matching functions, not a separate scoring formula.
+
+The pure algorithm is in [approximation.js](approximation.js), its worker is in
+[approximation-worker.js](approximation-worker.js), and the disposable dialog
+state lives in [import-preview.js](import-preview.js). Model tests in
+[pattern-studio.html](../../tests/pattern-studio.html) cover color limits,
+multi-shade preservation, transparency, block cleanup, rare colors, deterministic
+output, settings validation, and aspect-locked sizing.
 
 ## Yarn match
 
