@@ -218,5 +218,30 @@
                 "summary": "By far my favorite of the series. I also turned this one into a woven blanket, and I ACTUALLY HAVE THIS ONE! HA! However, the message is ironic... I didn't realize how much I lived by this when I made it."
             }
         ]
+    },
+    {
+        "slug": "take-flight-bitmap",
+        "title": "Fly - Bitmap rendering",
+        "date": "2026-10-26",
+        "type": "visual",
+        "preview": "3 color rendering of bitmap artwork, inspired by a bus stop advertisement.",
+        "summary": "This 3 color rendering was a recreation of an AI advertisement (gross) I saw at a bus stop in San Francisco. I tried to remove as much of the anti-human sentiment and do a better version. The artistic qualities were there. Such wasted talent.",
+        "images": [
+            {
+                "file": "./assets/art-posts/images/fly-bitmap/blue.webp",
+                "alt": "Fly, blue colorway",
+                "summary": "The blue rendering of the Fly graphic"
+            },
+            {
+                "file": "./assets/art-posts/images/fly-bitmap/green.webp",
+                "alt": "Fly, green colorway",
+                "summary": "The green rendering of the Fly graphic"
+            },
+            {
+                "file": "./assets/art-posts/images/fly-bitmap/orange.webp",
+                "alt": "Fly, orange colorway",
+                "summary": "The orange rendering of the Fly graphic"
+            }
+        ]
     }
 ]   
