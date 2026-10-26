@@ -7,6 +7,7 @@
         timeZone: 'America/Los_Angeles',
         worldLimit: 4000,
         worldPad: 120,
+        holdDelay: 400,
         imageSize: 480,
         fallbackBack: '../code.html',
     };
@@ -143,6 +144,9 @@
     const editbar = $('sb-editbar');
     const compactHub = $('sb-compact-hub');
     let hubInView = true;
+    // Keep the main controls centered through late layout changes until the user moves the board.
+    let pinnedCenter = true;
+    let worldBounds = null;
     const els = new Map();
 
     const myNote = () => state.notes.find((n) => n.deviceId === state.deviceId) || null;
@@ -181,6 +185,14 @@
             minY = Math.min(minY, n.y - r - CONFIG.worldPad);
             maxY = Math.max(maxY, n.y + r + CONFIG.worldPad);
         }
+        // Never shrink the world mid-edit: shrinking clamps the scroll position and yanks the view.
+        if (state.active && worldBounds) {
+            minX = Math.min(minX, worldBounds.minX);
+            maxX = Math.max(maxX, worldBounds.maxX);
+            minY = Math.min(minY, worldBounds.minY);
+            maxY = Math.max(maxY, worldBounds.maxY);
+        }
+        worldBounds = { minX, maxX, minY, maxY };
         const origin = { x: Math.round(-minX), y: Math.round(-minY) };
         const dx = origin.x - state.origin.x;
         const dy = origin.y - state.origin.y;
@@ -200,25 +212,61 @@
             if (ghost && mine) placeEl(ghost, mine);
             viewport.scrollBy(dx, dy);
         }
+        if (pinnedCenter && !state.active) centerView();
         return dx !== 0 || dy !== 0;
     }
 
-    function centerView() {
-        const panel = hub.querySelector('.sb-hub-main').getBoundingClientRect();
-        const rect = viewport.getBoundingClientRect();
-        viewport.scrollBy(
-            panel.left + panel.width / 2 - rect.left - viewport.clientWidth / 2,
-            panel.top + panel.height / 2 - rect.top - viewport.clientHeight / 2,
-        );
+    function unpinCenter() {
+        pinnedCenter = false;
     }
+
+    // Absolute target from world-relative geometry, so it's correct even if the reported scroll position is stale.
+    function centerTarget() {
+        const panel = hub.querySelector('.sb-hub-main').getBoundingClientRect();
+        const w = world.getBoundingClientRect();
+        return {
+            left: Math.round(panel.left - w.left + panel.width / 2 - viewport.clientWidth / 2),
+            top: Math.round(panel.top - w.top + panel.height / 2 - viewport.clientHeight / 2),
+        };
+    }
+
+    function centerView() {
+        const t = centerTarget();
+        viewport.scrollTo(t.left, t.top);
+    }
+
+    // iOS scrolls overflow elements in a separate process and can push an older scroll position back
+    // after a layout change. While pinned, snap back from any scroll the user didn't start.
+    let touching = 0;
+    let recenterRaf = 0;
+    const trackTouches = (e) => { touching = e.touches.length; };
+    viewport.addEventListener('touchstart', trackTouches, { passive: true });
+    viewport.addEventListener('touchend', trackTouches, { passive: true });
+    viewport.addEventListener('touchcancel', trackTouches, { passive: true });
+    viewport.addEventListener('scroll', () => {
+        if (!pinnedCenter || state.active) return;
+        if (touching) {
+            unpinCenter();
+            return;
+        }
+        cancelAnimationFrame(recenterRaf);
+        recenterRaf = requestAnimationFrame(() => {
+            if (!pinnedCenter || state.active || touching) return;
+            const t = centerTarget();
+            if (Math.abs(viewport.scrollLeft - t.left) > 1 || Math.abs(viewport.scrollTop - t.top) > 1) centerView();
+        });
+    }, { passive: true });
 
     function scrollToNote(note) {
         const de = viewport;
         const rect = world.getBoundingClientRect();
         const cx = rect.left + state.origin.x + note.x;
         const cy = rect.top + state.origin.y + note.y;
-        const m = N * 0.75;
-        if (cx > m && cx < de.clientWidth - m && cy > m && cy < de.clientHeight - m) return;
+        // Only scroll when the note is meaningfully off-screen; small (mobile) viewports need a smaller margin.
+        const mx = Math.min(N * 0.75, de.clientWidth / 4);
+        const my = Math.min(N * 0.75, de.clientHeight / 4);
+        if (cx > mx && cx < de.clientWidth - mx && cy > my && cy < de.clientHeight - my) return;
+        unpinCenter();
         const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         viewport.scrollTo({
             left: state.origin.x + note.x - de.clientWidth / 2,
@@ -481,18 +529,20 @@
             };
         }
         state.showGhost = false;
+        unpinCenter();
         renderAll();
         scrollToNote(state.active.note);
         focusActive();
     }
 
-    function beginMove() {
+    function beginMove({ scroll = true } = {}) {
         const mine = myNote();
         if (!mine || state.active) return;
         state.active = { kind: 'move', note: { ...mine } };
         state.showGhost = false;
+        unpinCenter();
         renderAll();
-        scrollToNote(mine);
+        if (scroll) scrollToNote(mine);
         focusActive();
     }
 
@@ -566,20 +616,74 @@
 
     function autoScrollTick() {
         if (!drag || drag.mode !== 'move') return;
-        const de = viewport;
-        const edge = 48;
-        const speed = 14;
+        const vw = viewport.clientWidth;
+        const vh = viewport.clientHeight;
+        const edge = 32;
+        const maxSpeed = 14;
         let dx = 0;
         let dy = 0;
-        if (drag.cx < edge) dx = -speed;
-        else if (drag.cx > de.clientWidth - edge) dx = speed;
-        if (drag.cy < edge) dy = -speed;
-        else if (drag.cy > de.clientHeight - edge) dy = speed;
+        // Only scroll once the user is actually dragging, and only toward the side they're heading.
+        if (drag.armed) {
+            const box = drag.el.getBoundingClientRect();
+            const vr = viewport.getBoundingClientRect();
+            const o = drag.overhang;
+            const depth = (fingerIn, noteOut) => Math.max(fingerIn, noteOut);
+            const left = depth(edge - (drag.cx - vr.left), drag.dirX < 0 ? vr.left - box.left - o.left : -1);
+            const right = depth(drag.cx - vr.left - (vw - edge), drag.dirX > 0 ? box.right - (vr.left + vw) - o.right : -1);
+            const top = depth(edge - (drag.cy - vr.top), drag.dirY < 0 ? vr.top - box.top - o.top : -1);
+            const bottom = depth(drag.cy - vr.top - (vh - edge), drag.dirY > 0 ? box.bottom - (vr.top + vh) - o.bottom : -1);
+            const speed = (d) => Math.ceil(maxSpeed * Math.min(1, d / edge));
+            if (left >= 0) dx = -speed(left + 1);
+            else if (right >= 0) dx = speed(right + 1);
+            if (top >= 0) dy = -speed(top + 1);
+            else if (bottom >= 0) dy = speed(bottom + 1);
+        }
         if (dx || dy) {
             viewport.scrollBy(dx, dy);
             applyDrag();
         }
         drag.raf = requestAnimationFrame(autoScrollTick);
+    }
+
+    function startDrag(e, noteEl) {
+        const a = state.active;
+        const wp = toWorld(e.clientX, e.clientY);
+        // A note picked up while already hanging off-screen shouldn't scroll until it's pushed further out.
+        const box = noteEl.getBoundingClientRect();
+        const vr = viewport.getBoundingClientRect();
+        const overhang = {
+            left: Math.max(0, vr.left - box.left),
+            right: Math.max(0, box.right - vr.left - viewport.clientWidth),
+            top: Math.max(0, vr.top - box.top),
+            bottom: Math.max(0, box.bottom - vr.top - viewport.clientHeight),
+        };
+        drag = {
+            mode: e.target.closest('.sb-rotate') ? 'rotate' : 'move',
+            pointerId: e.pointerId,
+            overhang,
+            sx: e.clientX,
+            sy: e.clientY,
+            cx: e.clientX,
+            cy: e.clientY,
+            dirX: 0,
+            dirY: 0,
+            armed: false,
+            shift: e.shiftKey,
+            offX: a.note.x - wp.x,
+            offY: a.note.y - wp.y,
+            el: noteEl,
+        };
+        noteEl.setPointerCapture(e.pointerId);
+        noteEl.classList.add('is-dragging');
+        drag.raf = requestAnimationFrame(autoScrollTick);
+    }
+
+    // Touch: press and hold your own note to pick it up and drag it in one gesture.
+    let hold = null;
+    function cancelHold() {
+        if (!hold) return;
+        clearTimeout(hold.timer);
+        hold = null;
     }
 
     world.addEventListener('pointerdown', (e) => {
@@ -588,20 +692,30 @@
         const a = state.active;
         if (a && noteEl && noteEl.dataset.id === a.note.id) {
             e.preventDefault();
-            const wp = toWorld(e.clientX, e.clientY);
-            drag = {
-                mode: e.target.closest('.sb-rotate') ? 'rotate' : 'move',
+            startDrag(e, noteEl);
+            return;
+        }
+        const mine = myNote();
+        if (!a && e.pointerType !== 'mouse' && noteEl && mine && noteEl.dataset.id === mine.id) {
+            cancelHold();
+            hold = {
                 pointerId: e.pointerId,
-                cx: e.clientX,
-                cy: e.clientY,
-                shift: e.shiftKey,
-                offX: a.note.x - wp.x,
-                offY: a.note.y - wp.y,
-                el: noteEl,
+                x: e.clientX,
+                y: e.clientY,
+                timer: setTimeout(() => {
+                    const ev = { pointerId: hold.pointerId, clientX: hold.x, clientY: hold.y, shiftKey: false, target: noteEl };
+                    hold = null;
+                    beginMove({ scroll: false });
+                    const el = els.get(mine.id);
+                    if (!state.active || !el) return;
+                    if (navigator.vibrate) navigator.vibrate(15);
+                    try {
+                        startDrag({ ...ev, target: el }, el);
+                    } catch (err) {
+                        drag = null; // pointer already released
+                    }
+                }, CONFIG.holdDelay),
             };
-            noteEl.setPointerCapture(e.pointerId);
-            noteEl.classList.add('is-dragging');
-            drag.raf = requestAnimationFrame(autoScrollTick);
             return;
         }
         // Mouse users can grab empty board to pan; touch already scrolls natively.
@@ -609,22 +723,50 @@
             e.preventDefault();
             drag = { mode: 'pan', pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, x0: viewport.scrollLeft, y0: viewport.scrollTop };
             document.body.style.cursor = 'grabbing';
+            unpinCenter();
         }
     });
 
+    // Only real user gestures unpin the centered view; programmatic scrolls fire none of these.
+    viewport.addEventListener('wheel', unpinCenter, { passive: true });
+    viewport.addEventListener('touchmove', unpinCenter, { passive: true });
+    viewport.addEventListener('pointerdown', (e) => {
+        if (e.target === viewport) unpinCenter(); // scrollbar grab
+    });
+    document.addEventListener('keydown', (e) => {
+        const scrollKeys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' '];
+        if (!scrollKeys.includes(e.key) || e.target.isContentEditable) return;
+        if (e.key === ' ' && e.target.tagName === 'BUTTON') return;
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || document.querySelector('dialog[open]')) return;
+        unpinCenter();
+    }, true);
+
     window.addEventListener('pointermove', (e) => {
+        if (hold && e.pointerId === hold.pointerId && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) cancelHold();
         if (!drag || e.pointerId !== drag.pointerId) return;
         if (drag.mode === 'pan') {
             viewport.scrollTo(drag.x0 - (e.clientX - drag.sx), drag.y0 - (e.clientY - drag.sy));
             return;
         }
+        if (e.clientX !== drag.cx) drag.dirX = Math.sign(e.clientX - drag.cx);
+        if (e.clientY !== drag.cy) drag.dirY = Math.sign(e.clientY - drag.cy);
+        if (!drag.armed && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > 8) drag.armed = true;
         drag.cx = e.clientX;
         drag.cy = e.clientY;
         drag.shift = e.shiftKey;
         applyDrag();
     });
 
+    // A long-press pickup starts after the touch began, so block native panning while a note is held.
+    document.addEventListener('touchmove', (e) => {
+        if (drag && drag.mode !== 'pan' && e.cancelable) e.preventDefault();
+    }, { passive: false });
+    world.addEventListener('contextmenu', (e) => {
+        if (e.target.closest('.sb-note.is-mine, .sb-note.is-active')) e.preventDefault();
+    });
+
     function endDrag(e) {
+        if (hold && e.pointerId === hold.pointerId) cancelHold();
         if (!drag || e.pointerId !== drag.pointerId) return;
         cancelAnimationFrame(drag.raf);
         if (drag.el) drag.el.classList.remove('is-dragging');
@@ -1053,7 +1195,10 @@
             toast('Live updates interrupted. Reconnecting to the shared board.');
         });
         window.addEventListener('resize', () => updateWorld());
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', () => updateWorld());
+        window.addEventListener('pageshow', (e) => { if (e.persisted) updateWorld(); });
         new ResizeObserver(() => updateWorld()).observe(viewport);
+        new ResizeObserver(() => updateWorld()).observe(hub);
         new IntersectionObserver(([entry]) => {
             hubInView = entry.isIntersecting;
             renderCompactHub();
