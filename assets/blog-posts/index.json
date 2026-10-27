@@ -6,9 +6,15 @@
     "preview": "My introduction, how this blog functions as a static site, and KISSing..."
   },
   {
-  "slug": "i-left-my-heart-on-telegraph",
-  "title": "I Left My Heart on Telegraph",
-  "date": "2026-10-01",
-  "preview": "A nostalgic look back at my time living in California, and the mess that I dragged along with me for all those years. Pictures along the way. The good, the bad, and the ugly."
-}
+    "slug": "i-left-my-heart-on-telegraph",
+    "title": "I Left My Heart on Telegraph",
+    "date": "2026-10-01",
+    "preview": "A nostalgic look back at my time living in California, and the mess that I dragged along with me for all those years. Pictures along the way. The good, the bad, and the ugly."
+  },
+  {
+    "slug": "the-platform-dilemma",
+    "title": "The Platform Dilemma: Does the audience destroy the artist?",
+    "date": "2026-10-27",
+    "preview": "Is this for the sake of expression or the sake of performance? When platforms profit off of creativity, does the artist have any integrity?"
+  }
 ]
