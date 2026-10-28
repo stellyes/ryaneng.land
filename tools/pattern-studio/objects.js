@@ -18,6 +18,33 @@ export function objectCorners(object) {
     });
 }
 
+export function snapTranslation(object, dx, dy, targets, cols, rows) {
+    const corners = objectCorners(object);
+    const left = Math.min(...corners.map(p => p.x)), right = Math.max(...corners.map(p => p.x));
+    const top = Math.min(...corners.map(p => p.y)), bottom = Math.max(...corners.map(p => p.y));
+    const result = { dx: Math.round(dx), dy: Math.round(dy), guides: [] };
+    for (const [axis, raw, size, source] of [
+        ['x', dx, cols, [left, (left + right) / 2, right]],
+        ['y', dy, rows, [top, (top + bottom) / 2, bottom]],
+    ]) {
+        let best = null;
+        for (const target of targets) {
+            const start = target[axis], length = target[axis === 'x' ? 'width' : 'height'];
+            for (const value of [start, start + length / 2, start + length]) for (const edge of source) {
+                const delta = value - edge, distance = Math.abs(delta - raw);
+                // Keep pixels on whole cells; unequal-parity centers cannot align exactly.
+                if (Math.abs(delta - Math.round(delta)) > 1e-8 || distance > size * 0.03) continue;
+                if (!best || distance < best.distance) best = { delta: Math.round(delta), value, distance };
+            }
+        }
+        if (best) {
+            result[axis === 'x' ? 'dx' : 'dy'] = best.delta;
+            result.guides.push({ axis, value: best.value });
+        }
+    }
+    return result;
+}
+
 export function resizeObject(object, corner, point) {
     const signs = { nw: [-1, -1], ne: [1, -1], se: [1, 1], sw: [-1, 1] };
     const [sx, sy] = signs[corner];
@@ -133,5 +160,18 @@ export function copyCells(project, box) {
         const sx = x + col, sy = y + row;
         cells.push(sx >= 0 && sy >= 0 && sx < project.cols && sy < project.rows ? project.cells[sy * project.cols + sx] : null);
     }
+
     return { width: box.width, height: box.height, cells };
+}
+
+export function rasterLayerObject(object) {
+    const corners = objectCorners(object);
+    const x = Math.floor(Math.min(...corners.map(point => point.x))), y = Math.floor(Math.min(...corners.map(point => point.y)));
+    const cols = Math.ceil(Math.max(...corners.map(point => point.x))) - x;
+    const rows = Math.ceil(Math.max(...corners.map(point => point.y))) - y;
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || cols * rows > 4000000) {
+        throw new Error('This layer transform exceeds the 4 million-cell working area. Reduce the layer dimensions.');
+    }
+    return [...rasterObject({ ...object, kind: 'paste', cx: object.cx - x, cy: object.cy - y }, cols, rows)]
+        .map(([index, color]) => [x + index % cols, y + Math.floor(index / cols), color]);
 }

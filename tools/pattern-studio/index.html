@@ -116,10 +116,15 @@
         </span>
       </div>
       <label class="check"><input id="reference-toggle" type="checkbox" checked disabled> Reference</label>
-      <label class="check"><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
+      <label class="check" title="Gridlines appear when cells are at least 10 screen pixels wide and tall."><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
+      <label class="check" title="Snap dragged layers to visible layers and canvas edges or centers within 3% of the canvas size."><input id="snapping-toggle" type="checkbox" checked disabled> Snapping</label>
     </section>
     <div class="workspace-area">
     <aside id="settings-dock" aria-label="Tool settings" hidden>
+    <details id="tools-dock" class="sidebar-panel" open>
+    <summary>Tool options</summary>
+    <div class="tool-panel-body">
+    <div id="tool-placeholder" role="status">No tool selected</div>
     <section id="object-settings" class="object-settings" aria-label="Drawing and placement controls" hidden>
       <div id="shape-options">
         <label>Shape <select id="shape-type"><option value="rectangle">Rectangle</option><option value="ellipse">Circle / Oval</option><option value="triangle">Triangle</option><option value="star">Star</option></select></label>
@@ -161,6 +166,32 @@
       <p id="crop-help">Drag inside the frame to move it; drag a corner to resize. Arrow keys move the focused frame or resize a focused corner. Enter applies; Escape cancels. Crops reference and paint; Undo restores both.</p>
       <p id="crop-error" role="alert"></p>
     </section>
+    </div>
+    </details>
+    <details id="layers-dock" class="sidebar-panel" open>
+    <summary>Layers</summary>
+    <section id="layer-panel" aria-label="Layers">
+      <div class="layer-heading"><label for="layer-blend">Blend mode</label><select id="layer-blend" aria-describedby="blend-help"></select></div>
+      <p id="blend-help" class="fine">Blend with visible layers below. The reference is not part of the blend.</p>
+      <label class="layer-opacity-label">Opacity
+        <input id="layer-opacity-range" type="range" min="0" max="100" step="1" value="100" aria-label="Layer opacity slider">
+        <input id="layer-opacity" type="number" min="0" max="100" step="1" value="100" aria-label="Layer opacity percent">%
+      </label>
+      <div id="layer-locks" role="group" aria-label="Layer locks"><span>Lock:</span></div>
+      <div id="layer-align" role="group" aria-label="Align selected layers"></div>
+      <div id="layer-warning" role="alert" hidden></div>
+      <div id="layer-list" role="listbox" aria-multiselectable="true" aria-label="Layer stack"></div>
+      <div class="layer-footer">
+        <button id="layer-up" type="button" aria-label="Move layer up" title="Move layer up">&#8593;</button>
+        <button id="layer-down" type="button" aria-label="Move layer down" title="Move layer down">&#8595;</button>
+        <button id="layer-new-folder" type="button" aria-label="New layer folder" title="New layer folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 3h9v12H3z"/></svg></button>
+        <button id="layer-new" type="button" aria-label="New blank layer" title="New blank layer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h10l4 4v14H5zM15 3v5h4M8 14h8m-4-4v8"/></svg></button>
+        <button id="layer-delete" type="button" aria-label="Delete selected layer or folder" title="Delete selected layer or folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7"/></svg></button>
+        <button id="layer-zoom" type="button" aria-label="Zoom options" aria-expanded="false" aria-controls="layer-zoom-options" title="Zoom options"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
+      </div>
+      <div id="layer-zoom-options" hidden></div>
+    </section>
+    </details>
     </aside>
     <section id="workspace" aria-label="Pattern workspace">
       <div id="empty">
@@ -271,6 +302,14 @@
     <input id="project-file" type="file" accept=".json,application/json" hidden>
   </main>
   <div id="sample-preview" aria-hidden="true" hidden><span id="sample-swatch"></span><span id="sample-hex"></span></div>
+  <dialog id="alignment-dialog" aria-labelledby="alignment-title">
+    <h2 id="alignment-title">Center between cells?</h2>
+    <p>Exact centering requires half a cell. Continue with the closest whole-cell alignment, rounding toward the right/bottom?</p>
+    <div class="dialog-actions">
+      <button id="alignment-cancel" type="button">Cancel</button>
+      <button id="alignment-approve" type="button">Align to nearest cell</button>
+    </div>
+  </dialog>
   <dialog id="project-dialog" aria-labelledby="projects-title">
     <div class="dialog-heading"><h2 id="projects-title">Your projects</h2><button data-close="project-dialog" aria-label="Close projects">Close</button></div>
     <p>Saved on this browser, on this device. Download a project backup to keep it safe or move it elsewhere. Clearing site data removes browser saves.</p>

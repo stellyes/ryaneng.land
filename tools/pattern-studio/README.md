@@ -5,8 +5,8 @@ pixel-art / tapestry crochet editor for tablet and desktop viewports (768px+).
 Serve the repository over HTTP (localhost) or HTTPS; no build or backend is needed.
 The existing Pages publishing workflow includes the tool automatically.
 The editor loads the shared site stylesheet for its Warbler/Sabbath Black fonts,
-gold text, forest-green texture, and dark panels. Its compact bottom-right zoom
-controls stay on one row.
+gold text, forest-green texture, and dark panels. The right-hand dock contains
+tool options, layers, and a magnifier button for zoom controls.
 
 - Create new opens a dialog with Blank canvas and Reference image tabs: start
   a blank canvas with 1-500 columns and rows, or upload a reference image.
@@ -42,10 +42,174 @@ controls stay on one row.
   Hover or keyboard-focus an icon for its plain-text tooltip; each button also
   has an accessible name. Erase block has been removed.
 - Tool settings appear in a fixed right-hand panel inside the canvas frame,
-  above Zoom Controls, rather than below the toolbar. Only one settings panel
+  above the layer list, rather than below the toolbar. Only one settings panel
   is visible at a time: choosing Grid, Crop, or a drawing/selection tool replaces
   the previous panel. The panel scrolls internally when needed and stays put
   while zooming or panning, without resizing the canvas viewport.
+  Tools without settings show their icon and tool name.
+  **Tool options** and **Layers** each start expanded. Click their heading/caret
+  (or focus it and press Enter/Space) to collapse to a single line and reopen.
+  On short screens the sidebar also scrolls, preserving space for usable layer
+  rows and their drag targets rather than shrinking the list out of view.
+- With Reference off, empty cells show an 8-screen-pixel gray checkerboard so
+  white paint is distinguishable from transparency. It is display-only:
+  exports, source pixels, reference sampling, and yarn comparisons are unchanged.
+  The checkerboard remains anchored to the board and stays the same screen size
+  as you zoom. Reference-on and sampling/cropping retain their white backing.
+- Gridlines appear only when each cell is at least 10 CSS pixels wide and tall,
+  with sufficient bitmap resolution as well. Below that threshold, only the
+  pixel colors are drawn, preventing dense antialiased lines from muting colors.
+  Gridlines return automatically when zoomed in; unchecking Gridlines still
+  disables them at every zoom. Crossing the threshold invalidates the old
+  raster immediately, so stale gridlines are not stretched while zoom settles.
+- Layers are listed top-first, with an isolated thumbnail, inline editable name,
+  visibility toggle, and selected-row border. The visibility eye is an unfilled
+  outline: beige when visible, light gray when hidden, with no button background.
+  The inline name editor fits its text, growing as you type up to the available
+  row width; the remaining row space selects the layer rather than editing its name.
+  The reference stays underneath the composite and is never listed as a layer.
+  Painting, fill, erasing,
+  shapes, lines, and clipboard edits affect only the active pixel layer;
+  exports, project previews, and yarn recommendations use the visible composite.
+  - Select a layer by its thumbnail, row, or name. Its painted bounding box
+    becomes a canvas selection; an empty layer selects the entire grid.
+    Drag its border/handles or use arrow keys to move, resize, or rotate its
+    pixels. Numeric dimensions and rotation work as with pasted content.
+    Enter/Apply commits and Escape cancels. Layer pixels outside the board are
+    preserved, but hidden in the editor and omitted from the canvas export.
+    Choose a drawing tool to finish this selection and resume painting.
+    Move and Space-drag continue to pan the viewport.
+  - Hold **Ctrl** (or **Cmd** on Mac) while clicking a row, name, grip, or
+    thumbnail to add/remove it from the selection. At least one item remains
+    selected. A normal row/thumbnail click selects only that item.
+    All selected rows are highlighted; the active row has an additional inset
+    border. The last added item is active, and painting and canvas transforms
+    continue to affect only that active pixel layer.
+    Dragging a selected item moves the selected stack items together, preserving
+    order and treating a selected folder and its descendants as one group.
+    Starting a drag on an unselected item switches to that item.
+    Up/Down buttons and grip keyboard arrows move selected stack items.
+    Footer copy/folder/trash drops apply to the entire selection; the folder
+    button also groups multiple selected items into one folder at the first
+    selected position. Copying a selected folder duplicates its full subtree.
+    Deleting a selected folder still ungroups its children; explicitly selected
+    pixel layers are deleted. Locked members or exceeded limits reject the
+    entire operation without partial changes.
+    Blend, opacity, and lock controls apply to all selected pixel layers,
+    including descendants of selected folders. Mixed locks show a mixed state;
+    clicking sets the lock for all. Mixed opacity/blend values show the active
+    layer's value (or the first contained pixel layer for an active folder),
+    with a mixed-value tooltip. Eye buttons still toggle only their own row.
+    Selection is preserved in saves/backups and restored with action undo/redo.
+  - Six alignment buttons below the locks align **left / vertical center / right**
+    or **top / horizontal center / bottom** to the painted bounds of the
+    **bottom-most selected nonempty pixel layer in stack order**, which stays put.
+    Selected folders recursively include their pixel layers; duplicates are
+    ignored. Empty layers are ignored, including when choosing the anchor.
+    Fewer than two participating layers shows a small **Select multiple layers**
+    warning that dismisses after 3.5 seconds.
+    If exact centering would require half a cell, a confirmation dialog lets the
+    user cancel or approve nearest-cell rounding, with ties toward right/bottom.
+    Alignment is atomic and undoable. Position/full locks block the operation
+    only if a locked layer would actually move; a locked stationary anchor is fine.
+  - **Snapping**, checked by default beside Reference and Gridlines, magnetically
+    aligns a dragged layer's edges or center axes to the canvas or other visible,
+    nonempty pixel layers (including visible folder contents). Red guides show
+    the detected metric within 3% of canvas width horizontally or height
+    vertically, independent of zoom. Each axis uses its nearest compatible metric.
+    Continue dragging beyond this distance to release the snap. Guides disappear
+    when the drag ends or is cancelled; they are never painted or exported.
+    Snapping only affects pointer moves, not resizing, rotation or arrow-key
+    nudges. It preserves whole-cell translations, skipping exact center matches
+    that would require half a cell. Turning it off leaves movement unrestricted.
+  - Layer moves now retain pixels at negative or beyond-board cell coordinates,
+    including fully off-canvas layers. Dragging selection borders or using arrow
+    keys can move beyond every canvas edge. Selection outlines/handles extend
+    past the grid; layer thumbnails include hidden pixels. Moving the layer
+    back reveals its original colors. Layer resize/rotation also retains the
+    transformed off-canvas raster. Copy, Cut, Delete, duplication, history,
+    IndexedDB saves and JSON backups include these pixels.
+    The canvas is the fixed export window: composites, PNG/WebP/JPG, home previews,
+    and yarn recommendations include only the board area.
+    Off-canvas pixels count toward the existing four-million-layer-cell budget;
+    transform/clipboard working bounds are limited to four million cells to
+    prevent very large sparse selections from allocating unbounded memory.
+    Whole-board extension, mirror, rotation, resize and crop rebase preserved
+    outside coordinates with the board. Crop still removes in-board pixels
+    outside its chosen area, as before; Undo restores the original board.
+  - Checkerboard locks transparency: only existing painted cells can be
+    recolored, and they cannot be erased. Brush locks painted colors: only
+    transparent cells can be painted. Arrows lock layer transforms, not painting.
+    The padlock blocks both pixel editing and transforms; its row badge replaces
+    the other lock badges. Selecting both pixel locks blocks all pixel editing.
+    Hidden layers/folders must be shown before editing their pixels.
+  - The page button creates a blank layer above the selected sibling or inside
+    the selected folder. The folder button creates a top-level folder.
+    Drag the grip or any unused row space with mouse, pen, or touch to reorder.
+    Clicking unused space without dragging selects the layer. The name editor,
+    visibility eye, and thumbnail/folder controls retain their normal actions.
+    A solid insertion line marks the exact drop position; dropping onto the
+    middle of a folder highlights it and inserts the layer as its first child,
+    expanding that folder. Dragging a folder moves its entire group.
+    Drag a child to a top-level row, the left gutter beside another child, or
+    the empty space below the list to ungroup it. The left gutter moves an item
+    up one folder level; the empty space moves it to the root.
+    Folders can be nested, but cannot contain themselves or their ancestors.
+    Nested rows are indented by depth, and hiding/collapsing a folder affects
+    all its descendants. Nested folders pass their pixels through in stack order.
+    The list auto-scrolls near its upper/lower edges; Escape or releasing outside
+    the list and footer targets cancels the drop. Fully locked layers cannot be dragged.
+    Keyboard alternative: focus a grip, use Up/Down to reorder siblings,
+    Left to ungroup, or Right to enter the nearest preceding folder.
+    Click a folder's arrow to expand/collapse it. Up/down footer buttons also
+    reorder siblings. Grouping and reordering are saved and undoable.
+    The trash button deletes the selected layer, except the last pixel layer or
+    a fully locked layer. Deleting a folder promotes its children to that folder's
+    parent without deleting their pixels. These edits are undoable.
+  - The footer icons also accept dragged layers and highlight before release:
+    trash deletes the dragged layer (not a different selected layer); the page
+    icon duplicates it immediately above the original in the same folder as
+    **[name] copy**, including independent pixels, locks, visibility, opacity,
+    and blend mode; the folder icon wraps it in **[name] folder** at the original
+    stack position. Wrapping an already-grouped layer creates a nested folder.
+    Copy/wrap targets accept layers and folders; dropping a folder onto trash uses
+    the non-destructive ungrouping behavior above. Names are shortened only if
+    needed to retain the suffix within the 80-character name limit.
+    These actions honor layer-count/cell limits and last-layer/full-lock guards,
+    are undoable/redoable, and persist in saves and backups.
+  - All 27 blend modes are implemented from
+    [the supplied mathematical guide](ref/photoshop_blend_modes.md), including
+    per-channel modes, whole-pixel Darker/Lighter Color, and W3C-style Hue,
+    Saturation, Color, and Luminosity. Computation uses normalized, stored
+    (gamma-encoded) RGB, with rounding only for the final 8-bit raster.
+    Soft Light and the non-separable modes follow the guide, not a claim of
+    bit-for-bit equivalence with Photoshop's proprietary implementation.
+  - Opacity is adjustable from 0-100% for each pixel layer and is undoable.
+    Alpha is composited correctly even when lower layers are partially
+    transparent. Dissolve uses a deterministic hash of the layer ID and cell
+    index: the same pattern appears in the editor, saved previews, and exports,
+    without flickering during zoom or redraw. At 100%, Dissolve is Normal;
+    at 0%, the layer contributes nothing.
+    Folders pass their children through; they do not have isolated group modes.
+    The reference is never a blend backdrop, and layer thumbnails show the
+    unchanged source pixels rather than a baked blend.
+  - Native PNG/WebP exports retain composite alpha; JPG composites it onto the
+    chosen export background. Yarn recommendations use the composite's
+    appearance on white, without the reference. Yarn-color previews/exports
+    replace painted cells with opaque yarn colors (a stitch is opaque).
+    Source palette colors remain editable and no blend is baked into them.
+  - Existing version-1 projects migrate to a single layer when opened. Version-2
+    saves/backups preserve layer pixels, names, visibility, locks, folders,
+    selection, opacity, and blend choices, plus a flattened compatibility preview
+    on white. Actual saved-project thumbnails are rendered from the full layers,
+    retaining alpha over the faded reference. Older layer saves with no opacity
+    field default to 100%.
+    Whole-project resize/crop/add/mirror/rotate edits transform every pixel
+    layer (including locked layers) and preserve layer metadata. Per-layer
+    transforms leave the reference and other layers unchanged.
+  - Projects support up to 64 layer/folder entries and four million total
+    raster-layer cells. Larger creations, imports, and grid resizes are rejected
+    explicitly rather than discarding layers.
 - The start screen lists saved projects in a scrollable menu below the intro,
   with **Create new** (blank canvas or reference image) at the top and projects newest
   first. Each row's background is the project preview (painted cells over a
@@ -204,6 +368,15 @@ Avoid editing the same saved project in multiple tabs simultaneously.
 For model/storage tests, serve the repository locally and open
 [tests/pattern-studio.html](../../tests/pattern-studio.html). The tests use an isolated,
 temporary IndexedDB database and remove it afterwards.
+They cover all blend formulas against the supplied guide, alpha/opacity,
+deterministic Dissolve, layer migration, locks, transforms, and persistence.
+The existing 3EB approximation regression additionally needs its chart fixture
+in `feature-reference` (recoverable from Git history if that folder was removed).
+
+[blending.js](blending.js) contains the pure RGB/RGBA formulas;
+[layers.js](layers.js) supplies the shared layer compositor used by the canvas,
+saved previews, yarn matching, and exports. Bounded per-pass caches reuse repeated
+color combinations without retaining unbounded image data.
 
 Brush strokes, line/shape/paste previews and the keyboard cursor repaint only
 the cells they touch instead of the whole canvas. Cells are drawn from a
@@ -213,7 +386,8 @@ zooming in, each step only rescales the existing canvas; the sharp
 full-resolution redraw runs once zooming pauses for 150 ms (zooming far out
 redraws immediately at the smaller size). This keeps
 painting, placing, selecting, panning and Ctrl+wheel zoom responsive on large
-(e.g. 339 x 500) grids at high zoom. To measure latency, open the editor, load
+(e.g. 339 x 500) grids at high zoom. Layer transforms repaint the composite so
+vacated pixels reveal the correct lower layers. To measure latency, open the editor, load
 `tests/pattern-studio-benchmark.js` from the browser console (for example by
 appending a `<script>` tag), and run
 `await patternStudioBenchmark.run({ painted: true, flush: true, moves: 60 })`

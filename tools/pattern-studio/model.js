@@ -1,3 +1,5 @@
+import { validateLayers } from './layers.js';
+
 export const MAX_SIDE = 500;
 
 export function parseGridSize(value) {
@@ -156,7 +158,7 @@ export function validateProject(data) {
           typeof rect === 'object' && Number.isInteger(rect.width) && Number.isInteger(rect.height) &&
           fits(rect.width, MAX_SIDE) && fits(rect.height, MAX_SIDE) && Number.isFinite(rect.x) && Number.isFinite(rect.y) &&
           rect.x >= -0.001 && rect.y >= -0.001 && rect.x + rect.width <= data.width + 0.001 && rect.y + rect.height <= data.height + 0.001;
-    if (!data || data.version !== 1 || typeof data.name !== 'string' || !data.name.trim() || data.name.length > 80 || !boardValid ||
+    if (!data || ![1, 2].includes(data.version) || typeof data.name !== 'string' || !data.name.trim() || data.name.length > 80 || !boardValid ||
         !Number.isInteger(data.cols) || !Number.isInteger(data.rows) ||
         data.cols < 1 || data.rows < 1 || Math.max(data.cols, data.rows) > MAX_SIDE ||
         !Array.isArray(data.palette) || data.palette.length > 32 ||
@@ -172,6 +174,7 @@ export function validateProject(data) {
     if (rect == null && (expected.cols !== data.cols || expected.rows !== data.rows)) {
         throw new Error('The project grid does not match its reference proportions.');
     }
+    if (data.version === 2 || data.layers !== undefined) validateLayers(data);
     return data;
 }
 

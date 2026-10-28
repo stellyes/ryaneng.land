@@ -1,15 +1,21 @@
-import { boxFromCells, copyCells, objectCorners, rasterObject, resizeObject, rotatePoint } from './objects.js';
+import { boxFromCells, copyCells, objectCorners, rasterObject, rasterLayerObject, resizeObject, rotatePoint, snapTranslation } from './objects.js';
+import { activeLayer, layerBounds, layerVisible } from './layers.js';
 
-export function createPlacementEditor({ canvas, getProject, getColor, getStroke, commitPixels, redraw, updateControls, notify }) {
+export function createPlacementEditor({ canvas, getProject, getColor, getStroke, getSnapping = () => false, canTransform = () => true, commitLayerPixels, commitPixels, redraw, updateControls, notify }) {
     const $ = id => document.getElementById(id);
     const overlay = $('object-overlay');
     let object = null;
     let drag = null;
     let clipboard = null;
     let pixels = null;
+    let guides = [];
+    const guideGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    guideGroup.classList.add('snap-guides');
+    guideGroup.setAttribute('aria-hidden', 'true');
+    $('object-outline').append(guideGroup);
 
     function refresh() {
-        if (object?.kind === 'selection') {
+        if (object?.kind === 'selection' && !object.layer) {
             const project = getProject();
             object.width = Math.max(1, Math.min(project.cols, object.width));
             object.height = Math.max(1, Math.min(project.rows, object.height));
@@ -34,6 +40,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function releaseDrag() {
+        guides = [];
         if (!drag) return;
         const finished = drag;
         drag = null;
@@ -43,7 +50,9 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     function preview() {
         if (!object) return new Map();
         const project = getProject();
-        if (!pixels) pixels = rasterObject(object, project.cols, project.rows, getColor());
+        if (!pixels) pixels = object.layer
+            ? object.transformed ? rasterObject({ ...object, kind: 'paste' }, project.cols, project.rows, getColor()) : new Map()
+            : rasterObject(object, project.cols, project.rows, getColor());
         return pixels;
     }
 
@@ -51,16 +60,45 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         if (!object) return;
         releaseDrag();
         const pending = preview();
+        const layer = object.layer, transformed = object.transformed;
+        if (layer && transformed && commitLayerPixels) {
+            try { commitLayerPixels(rasterLayerObject(object)); }
+            catch (error) { notify(error.message, true); return false; }
+        }
         object = null;
-        commitPixels(pending);
+        if (!layer || (transformed && !commitLayerPixels)) commitPixels(pending, Boolean(layer));
         refresh();
     }
 
-    function cancel() {
+    function cancel(silent = false) {
         releaseDrag();
         object = null;
         refresh();
-        notify('Selection or placement cancelled. The pattern is unchanged.');
+        if (!silent) notify('Selection or placement cancelled. The pattern is unchanged.');
+    }
+
+    function selectLayer(bounds) {
+        if (commit() === false) return;
+        const project = getProject();
+        const box = { cx: bounds.x + bounds.width / 2, cy: bounds.y + bounds.height / 2,
+            width: bounds.width, height: bounds.height, angle: 0 };
+        if (bounds.width * bounds.height > 4000000) {
+            notify('This layer selection exceeds the 4 million-cell working area. Move its pieces closer together before transforming.', true);
+            return;
+        }
+        const source = copyCells(project, box);
+        for (const [x, y, color] of activeLayer(project)?.offCanvas || []) {
+            source.cells[(y - bounds.y) * bounds.width + x - bounds.x] = color;
+        }
+        object = { ...box, kind: 'selection', layer: true, transformed: false,
+            source };
+        refresh();
+    }
+
+    function allowLayerTransform() {
+        if (!object?.layer || canTransform()) return true;
+        notify('This layer is position-locked. Unlock its position before moving, resizing, or rotating.', true);
+        return false;
     }
 
     function begin(event, tool) {
@@ -86,7 +124,10 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     function move(event) {
         if (!drag || drag.id !== event.pointerId) return;
         event.preventDefault();
+        drag.lastEvent = event;
+        guides = [];
         const point = pointAt(event), before = drag.before;
+        if (object.layer) object.transformed = true;
         if (drag.mode === 'draw') {
             const end = cellAt(point);
             if (object.kind === 'line') object.b = end;
@@ -99,7 +140,13 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         } else if (drag.mode === 'resize') {
             object = resizeObject(before, drag.corner, point);
         } else {
-            const dx = Math.round(point.x - drag.start.x), dy = Math.round(point.y - drag.start.y);
+            let dx = Math.round(point.x - drag.start.x), dy = Math.round(point.y - drag.start.y);
+            if (object.layer && getSnapping()) {
+                const project = getProject();
+                const snapped = snapTranslation(before, point.x - drag.start.x, point.y - drag.start.y,
+                    drag.targets, project.cols, project.rows);
+                dx = snapped.dx; dy = snapped.dy; guides = snapped.guides;
+            }
             if (object.kind === 'line') {
                 const project = getProject();
                 const boundedX = Math.max(-Math.min(before.a.x, before.b.x), Math.min(project.cols - 1 - Math.max(before.a.x, before.b.x), dx));
@@ -108,12 +155,13 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
                 object.b = { x: before.b.x + boundedX, y: before.b.y + boundedY };
             } else {
                 const project = getProject();
-                const minX = object.kind === 'selection' ? before.width / 2 : 0;
-                const minY = object.kind === 'selection' ? before.height / 2 : 0;
-                object.cx = Math.max(minX, Math.min(project.cols - minX, before.cx + dx));
-                object.cy = Math.max(minY, Math.min(project.rows - minY, before.cy + dy));
+                const minX = object.kind === 'selection' && !object.layer ? before.width / 2 : 0;
+                const minY = object.kind === 'selection' && !object.layer ? before.height / 2 : 0;
+                object.cx = object.layer ? before.cx + dx : Math.max(minX, Math.min(project.cols - minX, before.cx + dx));
+                object.cy = object.layer ? before.cy + dy : Math.max(minY, Math.min(project.rows - minY, before.cy + dy));
             }
         }
+        if (object.layer) object.transformed = true;
         refresh();
     }
 
@@ -129,6 +177,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         if (!object || drag || event.button !== 0 || !event.isPrimary) return;
         const handle = event.target.closest('[data-edit]');
         if (!handle) return;
+        if (!allowLayerTransform()) { event.preventDefault(); return; }
         event.preventDefault();
         event.stopPropagation();
         // Keep focus off SVG geometry: native SVG focus rings can scale with the grid.
@@ -136,6 +185,12 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         const point = pointAt(event);
         drag = { id: event.pointerId, target: overlay, mode: handle.dataset.edit, corner: handle.dataset.resize,
             start: point, before: structuredClone(object), angle: Math.atan2(point.y - object.cy, point.x - object.cx) * 180 / Math.PI };
+        if (object.layer && drag.mode === 'move') {
+            const project = getProject(), active = activeLayer(project);
+            drag.targets = [{ x: 0, y: 0, width: project.cols, height: project.rows },
+                ...project.layers.filter(layer => layer.type === 'layer' && layer !== active && layerVisible(project, layer) &&
+                    (layer.offCanvas?.length || layer.cells.some(color => color !== null))).map(layer => layerBounds(project, layer))];
+        }
         overlay.setPointerCapture(event.pointerId);
     });
     for (const element of [canvas, overlay]) {
@@ -156,17 +211,31 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function render() {
+        guideGroup.replaceChildren();
         overlay.hidden = !object;
         if (!object) return;
         const project = getProject(), isLine = object.kind === 'line';
         $('object-outline').setAttribute('viewBox', `0 0 ${project.cols} ${project.rows}`);
+        const corners = object.kind === 'line' ? [] : objectCorners(object);
+        for (const guide of guides) {
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            const vertical = guide.axis === 'x', other = vertical ? 'y' : 'x';
+            const values = corners.map(point => point[other]);
+            for (const [key, value] of Object.entries(vertical
+                ? { x1: guide.value, x2: guide.value, y1: Math.min(0, ...values), y2: Math.max(project.rows, ...values) }
+                : { y1: guide.value, y2: guide.value, x1: Math.min(0, ...values), x2: Math.max(project.cols, ...values) })) {
+                line.setAttribute(key, value);
+            }
+            guideGroup.append(line);
+        }
         $('line-hit').hidden = !isLine;
         $('box-hit').hidden = isLine;
         // SVG does not implement the HTML hidden attribute consistently.
         $('line-hit').style.display = isLine ? '' : 'none';
         $('box-hit').style.display = isLine ? 'none' : '';
         $('object-help').textContent = object.kind === 'selection'
-            ? 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
+            ? object.layer ? 'Selected layer: drag the border or handles to transform its pixels. Copy, Cut and Delete act on this layer. Enter applies; Escape cancels the transform.'
+                : 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
             : 'Drag handles to adjust; drag inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape or Delete cancels. Content outside the grid is clipped.';
         for (const button of overlay.querySelectorAll('button')) button.hidden = true;
         if (isLine) {
@@ -190,7 +259,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             }
             $('object-dimensions').textContent = `${object.width} x ${object.height} cells`;
             position($('object-dimensions'), corners[0]);
-            if (object.kind !== 'selection') {
+            if (object.kind !== 'selection' || object.layer) {
                 const button = overlay.querySelector('[data-edit="rotate"]');
                 const offset = rotatePoint(0, -object.height / 2 - 28 * project.rows / canvas.getBoundingClientRect().height, object.angle);
                 button.hidden = false;
@@ -205,15 +274,28 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
 
     function clearSelection() {
         releaseDrag();
+        if (object.layer && object.transformed) {
+            commit();
+            selectLayer(layerBounds(getProject(), activeLayer(getProject())));
+        }
         const project = getProject();
+        if (object.layer && commitLayerPixels) {
+            let changed;
+            try { changed = commitLayerPixels([], true); }
+            catch (error) { notify(error.message, true); return false; }
+            object = null;
+            refresh();
+            return changed;
+        }
         const x = Math.round(object.cx - object.width / 2), y = Math.round(object.cy - object.height / 2);
         const cleared = new Map();
         for (let row = 0; row < object.height; row++) for (let col = 0; col < object.width; col++) {
             cleared.set((y + row) * project.cols + x + col, null);
         }
         object = null;
-        commitPixels(cleared);
+        const changed = commitPixels(cleared);
         refresh();
+        return changed;
     }
 
     function copy(cut = false) {
@@ -222,10 +304,15 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             return;
         }
         releaseDrag();
-        clipboard = copyCells(getProject(), object);
+        if (object.layer && object.transformed) {
+            commit();
+            selectLayer(layerBounds(getProject(), activeLayer(getProject())));
+        }
+        clipboard = object.layer ? structuredClone(object.source) : copyCells(getProject(), object);
         if (cut) {
-            clearSelection();
-            notify(`Cut ${clipboard.width} x ${clipboard.height} cells. The original area is transparent. Paste to place the cut section; Undo restores the removal.`);
+            const changed = clearSelection();
+            notify(changed ? `Cut ${clipboard.width} x ${clipboard.height} cells. Unlocked pixels were cleared. Paste to place the copied section; Undo restores the removal.`
+                : 'Copied the selection, but no pixels were cut. The layer may be locked or empty.', !changed);
             return;
         }
         updateControls();
@@ -251,9 +338,10 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         if (!object || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
         if (event.key === 'Delete' && object.kind === 'selection') {
             event.preventDefault();
-            clearSelection();
+            const changed = clearSelection();
             canvas.focus({ preventScroll: true });
-            notify('Selected pixels deleted to transparency. Undo restores them. The clipboard is unchanged.');
+            notify(changed ? 'Selected pixels deleted to transparency. Undo restores them. The clipboard is unchanged.'
+                : 'No pixels were deleted. The layer may be locked or empty.', !changed);
             return true;
         }
         // Mac keyboards label Backspace "delete", so both discard a floating line, shape, or paste.
@@ -273,6 +361,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         const handle = event.target.closest('[data-edit]');
         if (event.target !== canvas && !handle) return false;
         event.preventDefault();
+        if (!allowLayerTransform()) return true;
         const amount = event.shiftKey ? 10 : 1, [dx, dy] = steps[event.key].map(value => value * amount);
         const project = getProject();
         if (handle?.dataset.edit === 'rotate') object.angle = (object.angle + (dx || dy) + 360) % 360;
@@ -287,11 +376,12 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             const point = objectCorners(object)[corner];
             object = resizeObject(object, handle.dataset.resize, { x: point.x + dx, y: point.y + dy });
         } else {
-            const marginX = object.kind === 'selection' ? object.width / 2 : 0;
-            const marginY = object.kind === 'selection' ? object.height / 2 : 0;
-            object.cx = Math.max(marginX, Math.min(project.cols - marginX, object.cx + dx));
-            object.cy = Math.max(marginY, Math.min(project.rows - marginY, object.cy + dy));
+            const marginX = object.kind === 'selection' && !object.layer ? object.width / 2 : 0;
+            const marginY = object.kind === 'selection' && !object.layer ? object.height / 2 : 0;
+            object.cx = object.layer ? object.cx + dx : Math.max(marginX, Math.min(project.cols - marginX, object.cx + dx));
+            object.cy = object.layer ? object.cy + dy : Math.max(marginY, Math.min(project.rows - marginY, object.cy + dy));
         }
+        if (object.layer) object.transformed = true;
         refresh();
         return true;
     }
@@ -306,7 +396,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     for (const key of ['width', 'height', 'angle']) $(`object-${key}`).addEventListener('change', event => {
-        if (!object || object.kind === 'line' || object.kind === 'selection') return;
+        if (!object || object.kind === 'line' || (object.kind === 'selection' && !object.layer)) return;
+        if (!allowLayerTransform()) { render(); return; }
         const value = Number(event.target.value), min = key === 'angle' ? 0 : 1, max = key === 'angle' ? 359 : 500;
         if (!event.target.value.trim() || !Number.isInteger(value) || value < min || value > max) {
             notify(`${key} must be a whole number from ${min} to ${max}.`, true);
@@ -314,6 +405,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             return;
         }
         object[key] = value;
+        if (object.layer) object.transformed = true;
         refresh();
     });
     for (const id of ['shape-type', 'shape-fill']) $(id).addEventListener('change', () => {
@@ -329,10 +421,16 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         refresh();
     }
     $('placement-apply').addEventListener('click', commit);
-    $('placement-cancel').addEventListener('click', cancel);
+    $('placement-cancel').addEventListener('click', () => cancel());
 
     return {
-        begin, commit, cancel, copy, cut: () => copy(true), paste, keydown, startKeyboard, refresh, render, preview, setStroke,
+        begin, commit, cancel, selectLayer, copy, cut: () => copy(true), paste, keydown, startKeyboard, refresh, render, preview, setStroke,
+        refreshSnapping() {
+            if (drag?.lastEvent) move(drag.lastEvent);
+            else { guides = []; render(); }
+        },
+        get layerSelected() { return Boolean(object?.layer); },
+        get transformingLayer() { return Boolean(object?.layer && object?.transformed); },
         get active() { return Boolean(object); },
         get kind() { return object?.kind; },
         get filled() { return Boolean(object?.filled); },

@@ -4,10 +4,18 @@ import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, strokeWidth } from './objects.js';
 import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchCustomMix, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
 import { createImportPreview } from './import-preview.js';
+import { activeLayer, bindLayer, migrateLayers, serializeLayers, flattenLayers, layerOrder, layerVisible,
+    createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, layerBounds, transformLayers,
+    layerRaster, layerPixels, checkLayerMemory } from './layers.js';
+import { createLayerPanel } from './layer-panel.js';
+import { pixelColor, pixelWord } from './blending.js';
+import { showGrid, createTransparencyPattern } from './display.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
 const context = canvas.getContext('2d');
+const transparencyPattern = createTransparencyPattern(context);
+let paintedGridVisible = false;
 const largeScreen = matchMedia('(min-width: 768px)');
 let project = null;
 let reference = null;
@@ -40,12 +48,57 @@ try {
 } catch { /* Widths fall back to 1 when storage is unavailable. */ }
 const placement = createPlacementEditor({
     canvas, getProject: () => project, getColor: () => selected, getStroke: kind => strokeWidths[kind],
+    getSnapping: () => $('snapping-toggle').checked,
+    canTransform: () => canTransform(activeLayer(project)),
     redraw: () => renderPlacement(), updateControls, notify,
-    commitPixels(pixels) {
-        if (!project || !Array.from(pixels).some(([index, color]) => project.cells[index] !== color)) return;
+    commitLayerPixels(entries, erase = false) {
+        const layer = activeLayer(project);
+        if (!layerVisible(project, layer)) throw new Error('Show this layer and its folders before editing.');
+        if (!erase && !canTransform(layer)) throw new Error('Unlock this layer position before transforming.');
+        const remaining = erase ? [...layerPixels(project, layer)].filter(([, , color]) =>
+            !canWrite(layer, color) || layer.locks.transparency) : entries;
+        const raster = layerRaster(project, remaining);
+        if (raster.cells.every((color, i) => layer.cells[i] === color) &&
+            JSON.stringify(raster.offCanvas) === JSON.stringify(layer.offCanvas || [])) return false;
+        checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
         remember(snapshot());
-        for (const [index, color] of pixels) project.cells[index] = color;
+        Object.assign(layer, raster);
+        bindLayer(project);
         changed();
+        return true;
+    },
+    commitPixels(pixels, replace = false) {
+        const layer = activeLayer(project);
+        if (!project || layer?.type !== 'layer') { notify('Select a pixel layer before editing.', true); return false; }
+        if (!layerVisible(project, layer)) { notify('Show this layer and its folder before editing.', true); return false; }
+        if (replace && !canTransform(layer)) { notify('This layer is position-locked.', true); return false; }
+        const changes = replace
+            ? new Map(layer.cells.map((color, index) => [index, pixels.get(index) ?? null]).filter(([index, color]) => layer.cells[index] !== color))
+            : new Map([...pixels].filter(([index, color]) => canWrite(layer, layer.cells[index]) &&
+                !(layer.locks.transparency && color === null) && layer.cells[index] !== color));
+        if (!changes.size) {
+            if (pixels.size && !replace && (layer.locks.all || layer.locks.color || layer.locks.transparency)) {
+                notify('No pixels changed: this edit is blocked by the layer locks.', true);
+            }
+            return false;
+        }
+        remember(snapshot());
+        for (const [index, color] of changes) layer.cells[index] = color;
+        changed();
+        return true;
+    },
+});
+const layerPanel = createLayerPanel({
+    getProject: () => project, remember, snapshot, changed, redraw: () => render(), notify,
+    beforeEdit() {
+        if (crop) { notify('Apply or cancel the crop before editing layers.', true); return false; }
+        finishPan(); finishStroke();
+        return placement.commit() !== false;
+    },
+    select() {
+        const layer = activeLayer(project);
+        if (layer?.type === 'layer') placement.selectLayer(layerBounds(project, layer));
+        else placement.cancel(true);
     },
 });
 
@@ -92,7 +145,8 @@ const storeReady = openStore().then(value => { store = value; }).catch(error => 
 
 function snapshot() {
     return {
-        cols: project.cols, rows: project.rows, cells: project.cells.slice(),
+        cols: project.cols, rows: project.rows, layers: structuredClone(project.layers), activeLayerId: project.activeLayerId,
+        selectedLayerIds: [...project.selectedLayerIds],
         width: project.width, height: project.height, referenceRect: project.referenceRect ?? null,
         reference: project.reference, referenceImage: reference,
     };
@@ -111,6 +165,7 @@ function prepareSampler() {
 function restoreSnapshot(saved) {
     const { referenceImage, ...data } = saved;
     Object.assign(project, data);
+    bindLayer(project);
     reference = referenceImage;
     prepareSampler();
     cursor = { x: 0, y: 0 };
@@ -122,7 +177,7 @@ function remember(before) {
     const cost = () => {
         const images = new Set();
         return history.reduce((sum, item) => {
-            let size = item.cells.length;
+            let size = item.layers.reduce((count, layer) => count + (layer.cells?.length || 0) + (layer.offCanvas?.length || 0) * 3, 0);
             if (!images.has(item.referenceImage)) {
                 images.add(item.referenceImage);
                 size += item.width * item.height + item.reference.length / 4;
@@ -141,6 +196,9 @@ function changed() {
     clearTimeout(timer);
     timer = setTimeout(() => save().catch(report), 700);
     updateControls();
+    layerPanel.render();
+    if (yarnLine) refreshYarnMapping();
+    if ($('yarn-menu').open) refreshYarnPanel();
 }
 
 async function save() {
@@ -148,7 +206,7 @@ async function save() {
     if (!project || !dirty) return;
     await storeReady;
     if (!store) throw new Error('Could not save in this browser. Download a project backup before leaving. ' + (storageError?.message || ''));
-    const data = structuredClone(project);
+    const data = structuredClone(serializeLayers(project));
     const savedRevision = revision;
     data.updatedAt = Date.now();
     $('save-state').textContent = 'Saving on this device...';
@@ -217,22 +275,32 @@ function updateControls() {
         for (const id of ['add-col-left', 'add-col-right', 'add-cols']) $(id).disabled ||= project.cols >= MAX_SIDE;
         for (const id of ['add-row-above', 'add-row-below', 'add-rows']) $(id).disabled ||= project.rows >= MAX_SIDE;
     }
-    for (const id of ['name', 'backup', 'export', 'grid-toggle', 'crop-start', 'reference-toggle', 'lines-toggle']) $(id).disabled = !active || Boolean(crop);
+    for (const id of ['name', 'backup', 'export', 'grid-toggle', 'crop-start', 'reference-toggle', 'lines-toggle', 'snapping-toggle']) $(id).disabled = !active || Boolean(crop);
     $('projects').disabled = Boolean(crop);
     document.querySelectorAll('[data-tool]').forEach(button => { button.disabled = !active || Boolean(crop); });
     $('undo').disabled = !active || Boolean(crop) || (!history.length && !placement.active);
-    $('redo').disabled = !active || Boolean(crop) || placement.active || !future.length;
+    $('redo').disabled = !active || Boolean(crop) ||
+        (placement.active && (!placement.layerSelected || placement.transformingLayer)) || !future.length;
     $('copy').disabled = !active || Boolean(crop) || !placement.selecting;
     $('cut').disabled = !active || Boolean(crop) || !placement.selecting;
     $('paste').disabled = !active || Boolean(crop) || !placement.canPaste;
     if (placement.active && !crop) settingsPanel = 'object';
     for (const panel of ['object', 'grid', 'crop']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
-    $('settings-dock').hidden = !active || !settingsPanel;
+    $('settings-dock').hidden = !active;
+    const placeholder = $('tool-placeholder');
+    placeholder.hidden = Boolean(settingsPanel);
+    if (!settingsPanel) {
+        placeholder.replaceChildren();
+        const button = document.querySelector(`[data-tool="${tool}"]`);
+        const icon = button?.querySelector('svg');
+        if (icon) placeholder.append(icon.cloneNode(true));
+        placeholder.append(button ? `${button.getAttribute('aria-label')} tool` : 'No tool selected');
+    }
     $('grid-toggle').setAttribute('aria-expanded', String(active && settingsPanel === 'grid'));
     $('crop-start').setAttribute('aria-expanded', String(active && settingsPanel === 'crop'));
     $('shape-options').hidden = tool !== 'shape' || (placement.active && placement.kind !== 'shape');
-    $('object-transform').hidden = placement.active ? !['shape', 'paste'].includes(placement.kind) : tool !== 'shape';
-    $('placement-apply').disabled = !placement.active || placement.selecting;
+    $('object-transform').hidden = placement.active ? !placement.layerSelected && !['shape', 'paste'].includes(placement.kind) : tool !== 'shape';
+    $('placement-apply').disabled = !placement.active || (placement.selecting && !placement.layerSelected);
     $('placement-cancel').disabled = !placement.active;
     for (const key of ['width', 'height', 'angle']) $(`object-${key}`).disabled = !placement.active;
     const strokeKind = activeStrokeKind();
@@ -323,7 +391,7 @@ function displayColor(color) {
 function refreshYarnMapping() {
     if (!yarnLine || !project) return;
     const previous = yarnMap;
-    const usage = colorUsage(project.cells, project.palette);
+    const usage = colorUsage(flattenLayers(project), project.palette);
     yarnMatch = yarnLine.custom ? matchCustomMix(usage, yarnLines) : matchYarnLine(usage, yarnLine);
     yarnMap = new Map();
     for (const [color, match] of yarnMatch.mapping) yarnMap.set(color, match.yarn);
@@ -393,7 +461,7 @@ function renderYarnMapping() {
     list.replaceChildren();
     $('yarn-mapping-section').hidden = !yarnLine || !yarnMatch || !yarnMatch.mapping.size;
     if ($('yarn-mapping-section').hidden) return;
-    renderYarnColors(list, colorUsage(project.cells, project.palette), yarnMatch);
+    renderYarnColors(list, colorUsage(flattenLayers(project), project.palette), yarnMatch);
 }
 
 function renderYarnColors(list, usage, matchResult = null, showCounts = false) {
@@ -510,7 +578,7 @@ async function refreshYarnPanel() {
     // Let the status paint before the ranking work.
     await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve)));
     if (!project || !$('yarn-menu').open) return;
-    const usage = colorUsage(project.cells, project.palette);
+    const usage = colorUsage(flattenLayers(project), project.palette);
     renderYarnRanking(rankYarnLines(usage, yarnLines, 5), matchCustomMix(usage, yarnLines), usage.length);
     if (yarnLine) refreshYarnMapping();
 }
@@ -560,6 +628,7 @@ function render({ paint = true } = {}) {
         canvas.width = bitmapWidth;
         canvas.height = bitmapHeight;
     }
+    paintedGridVisible = gridVisible();
     paintedTiles = null;
     if (paint) paintVisibleTiles();
     drawnPreview = previewBounds();
@@ -729,16 +798,23 @@ function updateCellLayer(x0, y0, x1, y1, withPreview) {
         cellImage = cellLayerContext.createImageData(project.cols, project.rows);
         cellWords = new Uint32Array(cellImage.data.buffer);
     }
-    const cells = project.cells, cols = project.cols, recolor = Boolean(yarnLine);
+    const cols = project.cols, recolor = Boolean(yarnLine);
+    const ordered = layerOrder(project).filter(layer => layer.type === 'layer' && layerVisible(project, layer));
+    const preview = withPreview ? placement.preview() : null;
+    const replacing = withPreview && placement.transformingLayer;
+    const composite = createLayerCompositor(project, preview, replacing, ordered);
+    const converted = new WeakMap();
     for (let y = y0; y < y1; y++) {
         for (let index = y * cols + x0, end = y * cols + x1; index < end; index++) {
-            const color = cells[index];
-            cellWords[index] = color === null ? 0 : colorWord(recolor ? displayColor(color) : color);
+            const pixel = composite(index);
+            if (!pixel) { cellWords[index] = 0; continue; }
+            let word = converted.get(pixel);
+            if (word === undefined) {
+                word = recolor ? colorWord(displayColor(pixelColor(pixel, true))) : pixelWord(pixel);
+                converted.set(pixel, word);
+            }
+            cellWords[index] = word;
         }
-    }
-    if (withPreview) for (const [index, color] of placement.preview()) {
-        const x = index % cols, y = (index - x) / cols;
-        if (x >= x0 && x < x1 && y >= y0 && y < y1) cellWords[index] = colorWord(recolor ? displayColor(color) : color);
     }
     cellLayerContext.putImageData(cellImage, 0, 0, x0, y0, x1 - x0, y1 - y0);
 }
@@ -756,7 +832,7 @@ function previewBounds() {
     }
     return maxX < 0 ? null : { minX, minY, maxX, maxY };
 }
-let drawnPreview = null, drawnCursor = false;
+let drawnPreview = null, drawnCursor = false, drawnLayerSelection = false;
 
 function cursorVisible() {
     return Boolean(project) && !crop && !placement.active && tool !== 'move' && keyboardFocus;
@@ -765,6 +841,9 @@ function cursorVisible() {
 // Placement edits only change the cells under the old and new previews, so repaint just those boxes.
 function renderPlacement() {
     if (!project || !largeScreen.matches || !canvas.width) return render();
+    const layerWasSelected = drawnLayerSelection;
+    drawnLayerSelection = placement.layerSelected;
+    if (placement.layerSelected || layerWasSelected) return render();
     const next = previewBounds();
     for (const box of [drawnPreview, next]) if (box) renderCells(box.minX, box.minY, box.maxX, box.maxY);
     drawnPreview = next;
@@ -773,12 +852,21 @@ function renderPlacement() {
     placement.render();
 }
 
+function gridVisible() {
+    return Boolean(project) && showGrid(project.cols, project.rows, canvas.clientWidth, canvas.clientHeight, canvas.width, canvas.height);
+}
+
 function paintLayers(x0, y0, x1, y1) {
     const cellWidth = project.width / project.cols, cellHeight = project.height / project.rows;
     context.setTransform(canvas.width / project.width, 0, 0, canvas.height / project.height, 0, 0);
-    context.fillStyle = '#ffffff';
+    const showReference = crop || tool === 'sample' || $('reference-toggle').checked;
+    if (showReference) context.fillStyle = '#ffffff';
+    else {
+        transparencyPattern.setTransform(new DOMMatrix().scale(project.width / canvas.clientWidth, project.height / canvas.clientHeight));
+        context.fillStyle = transparencyPattern;
+    }
     context.fillRect(x0 * cellWidth, y0 * cellHeight, (x1 - x0) * cellWidth, (y1 - y0) * cellHeight);
-    if (crop || tool === 'sample' || $('reference-toggle').checked) {
+    if (showReference) {
         context.globalAlpha = crop || tool === 'sample' ? 1 : 0.6;
         // Drawing only the needed part of the reference keeps tile repaints proportional to their size.
         const rect = referenceRect(project);
@@ -797,7 +885,7 @@ function paintLayers(x0, y0, x1, y1) {
             x0 * cellWidth, y0 * cellHeight, (x1 - x0) * cellWidth, (y1 - y0) * cellHeight);
         context.imageSmoothingEnabled = true;
     }
-    if (!crop && tool !== 'sample' && $('lines-toggle').checked) {
+    if (!crop && tool !== 'sample' && $('lines-toggle').checked && gridVisible()) {
         context.strokeStyle = 'rgba(30, 45, 35, 0.3)';
         context.lineWidth = project.width / canvas.width;
         context.beginPath();
@@ -862,7 +950,7 @@ async function activate(data) {
     const rect = referenceRect(data);
     if (image.naturalWidth !== rect.width || image.naturalHeight !== rect.height) throw new Error('The project reference dimensions are invalid.');
     if (!(await protectUnsaved())) return false;
-    project = data;
+    project = migrateLayers(data);
     reference = image;
     prepareSampler();
     selected = data.palette[0] || null;
@@ -893,6 +981,7 @@ async function activate(data) {
     updateControls();
     clearGridError();
     renderPalette();
+    layerPanel.render();
     render();
     return true;
 }
@@ -956,6 +1045,16 @@ function previewSample(event) {
 }
 
 function needsPaintColor() {
+    if (tool === 'select') return false;
+    const layer = activeLayer(project);
+    if (!layer || layer.type !== 'layer' || layer.locks.all || (layer.locks.color && layer.locks.transparency)) {
+        notify(layer?.type === 'folder' ? 'Select a pixel layer to paint.' : 'This layer is locked for pixel editing.', true);
+        return true;
+    }
+    if (!layerVisible(project, layer)) {
+        notify('Show this layer and its folder before editing.', true);
+        return true;
+    }
     if (['paint', 'fill', 'line', 'shape'].includes(tool) && !selected) {
         notify('Add a palette color or use Color sampler before painting.', true);
         return true;
@@ -972,23 +1071,38 @@ function cellAt(event) {
 }
 
 function applyCell(x, y) {
+    const layer = activeLayer(project);
+    if (layer?.type !== 'layer') return false;
     const color = tool === 'erase' ? null : selected;
+    let blocked = false;
+    const write = (index, value) => {
+        const differs = layer.cells[index] !== value;
+        const painted = writeLayerCell(layer, index, value);
+        if (differs && !painted) blocked = true;
+        return painted;
+    };
+    const finish = painted => {
+        if (blocked && !painted) notify('This edit is blocked by the layer locks.', true);
+        return painted;
+    };
     if (tool === 'fill') {
-        return flood(project.cells, project.cols, project.rows, x, y, color);
+        const cells = layer.cells.slice();
+        if (!flood(cells, project.cols, project.rows, x, y, color)) return false;
+        let painted = false;
+        for (let i = 0; i < cells.length; i++) if (cells[i] !== layer.cells[i]) painted = write(i, cells[i]) || painted;
+        return finish(painted);
     }
     if (tool === 'paint') {
         let painted = false;
         brush(x, y, strokeWidths.paint, (bx, by) => {
             if (bx < 0 || by < 0 || bx >= project.cols || by >= project.rows) return;
             const index = by * project.cols + bx;
-            if (project.cells[index] !== color) { project.cells[index] = color; painted = true; }
+            if (write(index, color)) painted = true;
         });
-        return painted;
+        return finish(painted);
     }
     const index = y * project.cols + x;
-    if (project.cells[index] === color) return false;
-    project.cells[index] = color;
-    return true;
+    return finish(write(index, color));
 }
 
 function renderStroke(from, to) {
@@ -1146,7 +1260,7 @@ document.addEventListener('keydown', event => {
     }
     if (!project || crop || !largeScreen.matches || document.querySelector('dialog[open]')) return;
     const target = event.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) return;
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"], .sidebar-panel > summary'))) return;
     const inWorkspace = target instanceof Element && Boolean(target.closest('#workspace'));
     if (!pointerOverWorkspace && !inWorkspace) return;
     // Keyboard-cursor users keep Space for painting or sampling the focused cell.
@@ -1236,7 +1350,11 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
 
 function undo() {
     if (crop) return;
-    if (placement.active) { placement.cancel(); return; }
+    if (placement.active) {
+        const selectedLayer = placement.layerSelected && !placement.transformingLayer;
+        placement.cancel();
+        if (!selectedLayer) return;
+    }
     finishStroke();
     if (!history.length) return;
     future.push(snapshot());
@@ -1246,7 +1364,10 @@ function undo() {
 
 function redo() {
     if (crop) return;
-    if (placement.active) return;
+    if (placement.active) {
+        if (!placement.layerSelected || placement.transformingLayer) return;
+        placement.cancel(true);
+    }
     finishStroke();
     if (!future.length) return;
     history.push(snapshot());
@@ -1270,7 +1391,7 @@ document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey || !project || crop || !largeScreen.matches ||
         document.querySelector('dialog[open]')) return;
     const target = event.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) {
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"], .sidebar-panel > summary'))) {
         if (event.key === 'Escape' && target.closest('#object-settings')) placement.keydown(event);
         return;
     }
@@ -1300,7 +1421,7 @@ function setZoom(value, anchor) {
     // repainting it at full resolution costs far more, so that waits until zooming pauses.
     const size = largeScreen.matches ? layoutCanvas() : null;
     // A bitmap much larger than needed makes newly revealed tiles expensive, so shrink it right away.
-    const full = !size || canvas.width > size.bitmapWidth * 1.5;
+    const full = !size || canvas.width > size.bitmapWidth * 1.5 || paintedGridVisible !== gridVisible();
     // Paint after the scroll is re-anchored so only the tiles that end up visible are drawn.
     if (full) render({ paint: false });
     const next = canvas.getBoundingClientRect();
@@ -1395,10 +1516,11 @@ function applyGrid() {
     const { cols, rows } = gridDimensions(project.width, project.height, size);
     if (cols === project.cols && rows === project.rows) return;
     placement.commit();
-    remember(snapshot());
-    project.cells = resizeCells(project.cells, project.cols, project.rows, cols, rows);
-    project.cols = cols;
-    project.rows = rows;
+    const before = snapshot();
+    const oldCols = project.cols, oldRows = project.rows;
+    transformLayers(project, cells => resizeCells(cells, oldCols, oldRows, cols, rows), cols, rows,
+        (x, y) => [Math.floor((x + 0.5) * cols / oldCols), Math.floor((y + 0.5) * rows / oldRows)]);
+    remember(before);
     cursor = { x: 0, y: 0 };
     changed(); render();
     notify('Grid resized. Existing paint was resampled; Undo restores the previous grid.');
@@ -1422,8 +1544,12 @@ function transformReference(width, height, draw) {
     return output;
 }
 
-function applyCanvasEdit(changes, output, message) {
-    remember(snapshot());
+function applyCanvasEdit(changes, output, message, transform, mapPoint) {
+    const before = snapshot();
+    const cols = changes.cols ?? project.cols, rows = changes.rows ?? project.rows;
+    transformLayers(project, transform, cols, rows, mapPoint);
+    remember(before);
+    delete changes.cells;
     Object.assign(project, changes);
     if (output) {
         project.reference = output.toDataURL('image/png');
@@ -1445,7 +1571,8 @@ function addCells(sides) {
     const added = left || right ? plural(left + right, 'column') : plural(top + bottom, 'row');
     const where = left ? 'to the left' : right ? 'to the right' : top ? 'above' : 'below';
     applyCanvasEdit({ ...grown, ...extendBoard(project, sides) }, null,
-        `Added ${added} ${where}. Undo removes ${left + right + top + bottom === 1 ? 'it' : 'them'}.`);
+        `Added ${added} ${where}. Undo removes ${left + right + top + bottom === 1 ? 'it' : 'them'}.`,
+        cells => extendCells(cells, project.cols, project.rows, sides).cells, (x, y) => [x + left, y + top]);
 }
 
 function mirrorCanvas(axis) {
@@ -1457,7 +1584,9 @@ function mirrorCanvas(axis) {
         ctx.drawImage(reference, 0, 0);
     });
     applyCanvasEdit({ cells: mirrorCells(project.cells, project.cols, project.rows, axis), ...mirrorBoard(project, axis) }, output,
-        `Mirrored ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}.`);
+        `Mirrored ${axis === 'horizontal' ? 'left to right' : 'top to bottom'}.`,
+        cells => mirrorCells(cells, project.cols, project.rows, axis),
+        (x, y) => axis === 'horizontal' ? [project.cols - 1 - x, y] : [x, project.rows - 1 - y]);
 }
 
 function rotateCanvas(clockwise) {
@@ -1469,7 +1598,9 @@ function rotateCanvas(clockwise) {
         ctx.drawImage(reference, 0, 0);
     });
     applyCanvasEdit({ ...rotateCells(project.cells, project.cols, project.rows, clockwise), ...rotateBoard(project, clockwise) }, output,
-        `Rotated 90\u00b0 ${clockwise ? 'right' : 'left'}.`);
+        `Rotated 90\u00b0 ${clockwise ? 'right' : 'left'}.`,
+        cells => rotateCells(cells, project.cols, project.rows, clockwise).cells,
+        (x, y) => clockwise ? [project.rows - 1 - y, x] : [y, project.cols - 1 - x]);
 }
 
 action('add-col-left', () => addCells({ left: 1 }));
@@ -1685,9 +1816,12 @@ function applyCrop() {
     const longest = Math.max(4, Math.min(MAX_SIDE, Math.round(Math.max(
         rect.width / project.width * project.cols, rect.height / project.height * project.rows))));
     const { cols, rows } = gridDimensions(rect.width, rect.height, longest);
-    const cells = cropCells(project, rect, cols, rows);
-    remember(snapshot());
-    Object.assign(project, { width: rect.width, height: rect.height, referenceRect: null, cols, rows, cells, reference: referenceData });
+    const before = snapshot();
+    transformLayers(project, cells => cropCells({ ...project, cells }, rect, cols, rows), cols, rows,
+        (x, y) => [Math.floor(((x + 0.5) * project.width / project.cols - rect.x) * cols / rect.width),
+            Math.floor(((y + 0.5) * project.height / project.rows - rect.y) * rows / rect.height)]);
+    remember(before);
+    Object.assign(project, { width: rect.width, height: rect.height, referenceRect: null, reference: referenceData });
     reference = output;
     prepareSampler();
     cursor = { x: 0, y: 0 };
@@ -1710,6 +1844,7 @@ document.addEventListener('keydown', event => {
     }
 });
 for (const id of ['reference-toggle', 'lines-toggle']) $(id).addEventListener('change', render);
+$('snapping-toggle').addEventListener('change', () => placement.refreshSnapping());
 $('stroke-range').addEventListener('input', () => setStrokeWidth(Number($('stroke-range').value)));
 $('stroke-width').addEventListener('change', () => {
     const input = $('stroke-width'), value = Number(input.value);
@@ -1976,7 +2111,7 @@ async function projectPreview(data) {
         const cellContext = cells.getContext('2d');
         const pixels = cellContext.createImageData(data.cols, data.rows);
         const words = new Uint32Array(pixels.data.buffer);
-        data.cells.forEach((color, index) => { if (color !== null) words[index] = colorWord(color); });
+        words.set(flattenPixels(data));
         cellContext.putImageData(pixels, 0, 0);
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(cells, 0, 0, art.width, art.height);
@@ -2163,7 +2298,7 @@ function download(blob, extension, name = project.name) {
 }
 
 action('backup', () => {
-    download(new Blob([JSON.stringify(project)], { type: 'application/json' }), 'pattern.json');
+    download(new Blob([JSON.stringify(serializeLayers(project))], { type: 'application/json' }), 'pattern.json');
     notify('Project backup downloaded. Keep this file to restore your editable pattern and reference.');
 });
 action('export', () => {
@@ -2186,14 +2321,17 @@ action('download-image', async () => {
         ctx.fillRect(0, 0, output.width, output.height);
     }
     const yarnColors = Boolean(yarnLine) && $('export-yarn').checked;
-    project.cells.forEach((color, index) => {
-        if (color === null) return;
+    const composite = createLayerCompositor(project);
+    for (let index = 0; index < project.cols * project.rows; index++) {
+        const pixel = composite(index);
+        if (!pixel) continue;
         const x = index % project.cols, y = Math.floor(index / project.cols);
         const left = Math.round(x * output.width / project.cols), top = Math.round(y * output.height / project.rows);
         const right = Math.round((x + 1) * output.width / project.cols), bottom = Math.round((y + 1) * output.height / project.rows);
-        ctx.fillStyle = yarnColors ? displayColor(color) : color;
+        ctx.fillStyle = yarnColors ? displayColor(pixelColor(pixel, true)) : pixelColor(pixel);
+        ctx.globalAlpha = yarnColors ? 1 : Math.round(pixel[3] * 255) / 255;
         ctx.fillRect(left, top, right - left, bottom - top);
-    });
+    }
     const blob = await new Promise(resolve => output.toBlob(resolve, `image/${format}`, 0.95));
     if (!blob || blob.type !== `image/${format}`) throw new Error(`This browser cannot export ${format.toUpperCase()}. Please choose PNG.`);
     download(blob, format === 'jpeg' ? 'jpg' : format);

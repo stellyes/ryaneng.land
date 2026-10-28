@@ -8,8 +8,17 @@
 import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
 import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
-import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth } from '../tools/pattern-studio/objects.js';
+import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth, snapTranslation } from '../tools/pattern-studio/objects.js';
 import { approximateGrid, approximationDimensions } from '../tools/pattern-studio/approximation.js';
+import { createPlacementEditor } from '../tools/pattern-studio/placement.js';
+import { blendRgb, blendPixel, pixelColor, pixelWord, layerSeed, dissolveNoise } from '../tools/pattern-studio/blending.js';
+import { showGrid, createTransparencyPattern, GRID_MIN_CELL_SIZE } from '../tools/pattern-studio/display.js';
+import { BLEND_MODES, LOCKS, MAX_LAYERS, MAX_LAYER_CELLS, activeLayer, bindLayer, migrateLayers, newLayer,
+    layerOrder, layerVisible, compositeColor, flattenLayers, serializeLayers, canWrite, writeLayerCell,
+    canTransform, layerBounds, transformLayers, validateLayers, createLayerCompositor, flattenPixels, moveLayer,
+    layerAncestors, layerDropAction, deleteLayer, selectedLayers, selectedPixels, editLayerSelection,
+    layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers } from '../tools/pattern-studio/layers.js';
+import { rasterLayerObject } from '../tools/pattern-studio/objects.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -23,6 +32,398 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    assert(GRID_MIN_CELL_SIZE === 10 && !showGrid(500, 500, 4999, 5000, 10000, 10000) &&
+        showGrid(500, 500, 5000, 5000, 10000, 10000), 'Grid appears only at the exact 10-CSS-pixel cell threshold');
+    assert(!showGrid(500, 500, 6000, 6000, 4999, 6000), 'A stretched low-resolution bitmap cannot show a dense grid');
+    assert(!showGrid(100, 500, 2000, 4000, 2000, 4000), 'Grid visibility checks both cell dimensions');
+    const checkerCanvas = document.createElement('canvas');
+    checkerCanvas.width = checkerCanvas.height = 32;
+    const checkerContext = checkerCanvas.getContext('2d');
+    checkerContext.fillStyle = createTransparencyPattern(checkerContext);
+    checkerContext.fillRect(0, 0, 32, 32);
+    const checkerPixel = (x, y) => [...checkerContext.getImageData(x, y, 1, 1).data].join();
+    assert(checkerPixel(1, 1) === '170,170,170,255' && checkerPixel(9, 1) === '214,214,214,255' &&
+        checkerPixel(17, 1) === checkerPixel(1, 1), 'Transparency checkerboard has opaque alternating 8-pixel neutral squares');
+    checkerContext.fillStyle = '#ffffff';
+    checkerContext.fillRect(0, 0, 1, 1);
+    assert(checkerPixel(0, 0) !== checkerPixel(1, 1), 'White pixels remain distinguishable from the transparency background');
+    const reorder = migrateLayers({ cols: 1, rows: 1, cells: ['#000000'] });
+    const a = reorder.layers[0], b = newLayer(1, 1, 'B', ['#ffffff']), c = newLayer(1, 1, 'C');
+    const group = { id: 'group', name: 'Group', type: 'folder', parentId: null, visible: true, expanded: false };
+    reorder.layers.push(b, group, c);
+    assert(moveLayer(reorder, c.id, a.id, 'before') && layerOrder(reorder)[0] === c, 'Drag reordering inserts exactly before the target');
+    assert(moveLayer(reorder, c.id, b.id, 'after') && layerOrder(reorder)[2] === c, 'Drag reordering inserts exactly after the target');
+    assert(moveLayer(reorder, b.id, group.id, 'inside') && b.parentId === group.id && group.expanded,
+        'Dropping on a folder groups the layer and expands the folder');
+    moveLayer(reorder, c.id, b.id, 'after', group.id);
+    assert(layerOrder(reorder).map(item => item.id).join() === [a.id, group.id, b.id, c.id].join(),
+        'Insertion between folder children preserves their exact order');
+    const pixelsBeforeMove = b.cells.slice();
+    moveLayer(reorder, group.id, a.id, 'before');
+    assert(layerOrder(reorder).map(item => item.id).join() === [group.id, b.id, c.id, a.id].join() &&
+        b.cells.join() === pixelsBeforeMove.join(), 'Dragging a folder moves its entire group without changing pixel data');
+    moveLayer(reorder, b.id, group.id, 'after', null);
+    assert(b.parentId === null && layerOrder(reorder).map(item => item.id).join() === [group.id, c.id, b.id, a.id].join(),
+        'Dropping after a group ungroups a layer without splitting the folder');
+    assert(!moveLayer(reorder, b.id, b.id, 'before') && !moveLayer(reorder, group.id, c.id, 'after'),
+        'Self-drops and folder drops into their own children are no-ops');
+    b.locks.all = true;
+    rejects(() => moveLayer(reorder, b.id, a.id, 'after'), 'Fully locked layers cannot be dragged');
+    b.locks.all = false; b.locks.position = true;
+    assert(moveLayer(reorder, b.id, a.id, 'after'), 'Canvas position locks do not prevent stack reordering');
+    rejects(() => moveLayer(reorder, a.id, b.id, 'inside'), 'Only folders accept grouped layer drops');
+    rejects(() => moveLayer(reorder, a.id, 'missing', 'after'), 'Missing drop targets fail explicitly');
+    rejects(() => moveLayer(reorder, a.id, c.id, 'before'), 'A root drop cannot split a folder group');
+    rejects(() => moveLayer(reorder, a.id, b.id, 'before', group.id), 'Grouped drops require a target in the same folder');
+    rejects(() => moveLayer(reorder, group.id, a.id, 'after', group.id), 'A folder cannot be its own parent');
+    assert(moveLayer(reorder, c.id) && c.parentId === null && layerOrder(reorder).at(-1) === c,
+      'Dropping below the list ungroups and appends the layer');
+    {
+    const drops = migrateLayers({ cols: 1, rows: 1, cells: ['#123456'] });
+    const original = drops.layers[0];
+    original.name = 'Original'; original.opacity = 0.4; original.blendMode = 'Multiply';
+    original.visible = false; original.locks.transparency = true;
+    layerDropAction(drops, original.id, 'copy');
+    const copy = activeLayer(drops);
+    assert(copy.id !== original.id && copy.name === 'Original copy' && copy.cells[0] === '#123456' &&
+      copy.opacity === 0.4 && copy.blendMode === 'Multiply' && !copy.visible && copy.locks.transparency,
+      'New-layer drops duplicate pixels, appearance, visibility, and locks with a fresh ID');
+    copy.cells[0] = '#ffffff'; copy.locks.transparency = false;
+    assert(original.cells[0] === '#123456' && original.locks.transparency, 'Duplicate cells and locks are independent');
+    assert(layerOrder(drops)[0] === copy && layerOrder(drops)[1] === original, 'Duplicates are immediately above their source');
+    layerDropAction(drops, original.id, 'folder');
+    const outer = drops.layers.find(item => item.id === original.parentId);
+    assert(outer.name === 'Original folder' && outer.expanded && outer.visible &&
+      layerOrder(drops).map(item => item.id).join() === [copy.id, outer.id, original.id].join(),
+      'Folder drops wrap the layer at its original stack position');
+    layerDropAction(drops, original.id, 'folder');
+    const inner = drops.layers.find(item => item.id === original.parentId);
+    assert(inner.parentId === outer.id && layerAncestors(drops, original).length === 2 &&
+      layerOrder(drops).map(item => item.id).join() === [copy.id, outer.id, inner.id, original.id].join(),
+      'Wrapping an already-grouped layer creates a nested folder in place');
+    original.visible = true; outer.visible = false;
+    assert(!layerVisible(drops, original), 'Hidden ancestors hide all nested descendants');
+    outer.visible = true;
+    assert(layerVisible(drops, original), 'Nested layer visibility includes every ancestor');
+    validateLayers(drops);
+    assert(true, 'Nested folder data validates for persistence');
+    moveLayer(drops, outer.id, copy.id, 'before');
+    assert(layerOrder(drops).map(item => item.id).join() === [outer.id, inner.id, original.id, copy.id].join(),
+      'Moving an outer folder retains all nested descendants as a block');
+    moveLayer(drops, outer.id, copy.id, 'after');
+    moveLayer(drops, inner.id, copy.id, 'before');
+    assert(inner.parentId === null && original.parentId === inner.id, 'Nested folders can be moved out with their contents');
+    moveLayer(drops, inner.id, outer.id, 'inside');
+    assert(inner.parentId === outer.id && original.parentId === inner.id, 'Folder drops support nesting existing folder groups');
+    assert(!moveLayer(drops, outer.id, inner.id, 'inside'), 'Folders cannot move inside their descendants');
+    const cycle = JSON.parse(JSON.stringify(drops));
+    cycle.layers.find(item => item.id === outer.id).parentId = inner.id;
+    rejects(() => validateLayers(cycle), 'Cyclic ancestor relationships are rejected on import');
+    layerDropAction(drops, original.id, 'copy');
+    const nestedCopy = activeLayer(drops);
+    assert(nestedCopy.parentId === inner.id, 'Duplicating a nested layer retains its folder');
+    deleteLayer(drops, inner.id);
+    assert(original.parentId === outer.id && nestedCopy.parentId === outer.id,
+      'Deleting a nested folder promotes its children one level without losing pixels');
+    moveLayer(drops, outer.id, copy.id, 'before');
+    assert(layerOrder(drops).map(item => item.id).join() === [outer.id, nestedCopy.id, original.id, copy.id].join(),
+      'Nested folder moves preserve the entire descendant block');
+    layerDropAction(drops, nestedCopy.id, 'delete');
+    assert(!drops.layers.includes(nestedCopy) && drops.layers.includes(original), 'Trash drops delete the dragged layer, not a different selection');
+    original.locks.all = true;
+    rejects(() => layerDropAction(drops, original.id, 'delete'), 'Trash drops respect full locks');
+    rejects(() => layerDropAction(drops, original.id, 'copy'), 'Copy drops respect full locks');
+    original.locks.all = false;
+    deleteLayer(drops, copy.id);
+    rejects(() => layerDropAction(drops, original.id, 'delete'), 'Trash drops preserve the last pixel layer');
+    original.name = 'x'.repeat(80);
+    layerDropAction(drops, original.id, 'copy');
+    assert(activeLayer(drops).name.length === 80 && activeLayer(drops).name.endsWith(' copy'),
+      'Copy suffix respects the persisted layer-name length limit');
+    const fullDrops = { ...drops, layers: [...drops.layers] };
+    while (fullDrops.layers.length < 64) fullDrops.layers.push({ id: crypto.randomUUID(), type: 'folder', name: 'F', parentId: null, visible: true, expanded: true });
+    rejects(() => layerDropAction(fullDrops, original.id, 'folder'), 'Wrapping respects the entry limit');
+    rejects(() => layerDropAction(fullDrops, original.id, 'copy'), 'Duplicating respects the entry limit');
+    const largeDrops = { ...drops, cols: 2000, rows: 2000 };
+    rejects(() => layerDropAction(largeDrops, original.id, 'copy'), 'Duplicating respects the total raster-cell budget');
+    }
+    {
+        const p = migrateLayers({ cols: 1, rows: 1, cells: ['#123456'] });
+        const a = p.layers[0], b = newLayer(1, 1, 'B'), c = newLayer(1, 1, 'C'), d = newLayer(1, 1, 'D');
+        a.name = 'A'; p.layers.push(b, c, d); p.selectedLayerIds = [a.id, c.id];
+        assert(selectedLayers(p).map(layer => layer.name).join() === 'A,C', 'Multiple selections follow stack order');
+        editLayerSelection(p, 'move', { target: d.id, position: 'after', parentId: null });
+        assert(layerOrder(p).map(layer => layer.name).join() === 'B,D,A,C', 'Multi-drag preserves selected order after its target');
+        editLayerSelection(p, 'up');
+        assert(layerOrder(p).map(layer => layer.name).join() === 'B,A,C,D', 'Moving selected rows up retains their relative order');
+        editLayerSelection(p, 'down');
+        assert(layerOrder(p).map(layer => layer.name).join() === 'B,D,A,C', 'Moving selected rows down retains their relative order');
+        editLayerSelection(p, 'folder');
+        const group = p.layers.find(layer => layer.type === 'folder');
+        assert(group.name === 'A folder' && a.parentId === null &&
+            p.layers.find(layer => layer.id === a.id).parentId === group.id &&
+            p.layers.find(layer => layer.id === c.id).parentId === group.id,
+            'Grouping multiple rows creates one folder at the first selected position');
+        p.selectedLayerIds = [group.id, a.id]; p.activeLayerId = a.id;
+        assert(selectedLayers(p, true).length === 1 && selectedPixels(p).length === 2,
+            'Selected ancestors deduplicate group actions and include descendant pixel settings');
+        const beforeCopy = flattenLayers(p).join();
+        editLayerSelection(p, 'copy');
+        const copyGroup = p.layers.find(layer => layer.id === p.activeLayerId);
+        assert(copyGroup.name === 'A folder copy' && selectedPixels(p).length === 2 &&
+            layerOrder(p).filter(layer => layer.parentId === copyGroup.id).map(layer => layer.name).join() === 'A,C',
+            'Multi-copy duplicates a selected folder subtree only once');
+        assert(selectedPixels(p)[0].cells !== p.layers.find(layer => layer.id === a.id).cells,
+            'Copied folder pixels do not alias their source');
+        validateLayers(p);
+        assert(true, 'Multiple selected folders survive schema validation');
+        editLayerSelection(p, 'delete');
+        assert(flattenLayers(p).join() === beforeCopy && !p.layers.some(layer => layer.id === copyGroup.id),
+            'Deleting a selected folder ungroups its children rather than deleting their pixels');
+        p.selectedLayerIds = p.layers.filter(layer => layer.type === 'layer').map(layer => layer.id);
+        p.activeLayerId = p.selectedLayerIds[0];
+        const before = JSON.stringify(p);
+        rejects(() => editLayerSelection(p, 'delete'), 'Deleting every pixel layer is rejected');
+        assert(JSON.stringify(p) === before, 'Failed bulk deletion leaves every layer and selection unchanged');
+        const locked = selectedPixels(p)[1]; locked.locks.all = true;
+        const lockedBefore = JSON.stringify(p);
+        rejects(() => editLayerSelection(p, 'folder'), 'Bulk grouping rejects a locked member');
+        assert(JSON.stringify(p) === lockedBefore, 'Rejected bulk grouping is atomic');
+        locked.locks.all = false;
+        const bad = structuredClone(p); bad.selectedLayerIds = ['missing'];
+        rejects(() => validateLayers(bad), 'Invalid saved selections are rejected');
+        p.selectedLayerIds = [a.id, c.id]; p.activeLayerId = a.id;
+        const serialized = serializeLayers(p);
+        assert(serialized.selectedLayerIds.join() === p.selectedLayerIds.join(),
+            'Backups retain multi-selection metadata');
+        const limited = structuredClone(p);
+        while (limited.layers.length < 63) limited.layers.push({
+            id: crypto.randomUUID(), name: 'F', type: 'folder', parentId: null, visible: true, expanded: true,
+        });
+        const limitBefore = JSON.stringify(limited);
+        rejects(() => editLayerSelection(limited, 'copy'), 'Multi-copy enforces limits across the whole batch');
+        assert(JSON.stringify(limited) === limitBefore, 'A partial multi-copy cannot leak layers when a later copy exceeds limits');
+        const selectionBefore = [...p.selectedLayerIds];
+        const alias = p.cells;
+        bindLayer(p);
+        assert(p.cells === alias && p.selectedLayerIds.join() === selectionBefore.join(),
+            'Binding the active painting layer preserves multiple selected rows');
+    }
+    {
+        function fixture() {
+            const p = migrateLayers({ cols: 8, rows: 8, cells: Array(64).fill(null) });
+            p.layers[0].name = 'Moving';
+            p.layers[0].cells[0] = '#ff0000'; p.layers[0].cells[9] = '#ffffff';
+            const anchor = newLayer(8, 8, 'Anchor');
+            anchor.cells[27] = '#000000'; anchor.cells[36] = '#000000';
+            p.layers.push(anchor);
+            p.selectedLayerIds = p.layers.map(layer => layer.id);
+            return p;
+        }
+        for (const [mode, x, y] of [
+            ['left', 3, 0], ['center-x', 3, 0], ['right', 3, 0],
+            ['top', 0, 3], ['center-y', 0, 3], ['bottom', 0, 3],
+        ]) {
+            const p = fixture(), anchorBefore = JSON.stringify(p.layers[1]);
+            alignLayers(p, mode);
+            const bounds = layerBounds(p, p.layers[0]);
+            assert(bounds.x === x && bounds.y === y, `${mode} aligns painted bounds to the bottom-most selected layer`);
+            assert(JSON.stringify(p.layers[1]) === anchorBefore, `${mode} leaves the reference layer unchanged`);
+        }
+        for (const [mode, expected] of [['left', 3], ['center-x', 2], ['right', 1], ['top', 3], ['center-y', 2], ['bottom', 1]]) {
+            const p = fixture(), moving = p.layers[0];
+            moving.cells.fill(null); moving.cells[0] = '#ff0000'; moving.cells[27] = '#ffffff';
+            alignLayers(p, mode);
+            const bounds = layerBounds(p, p.layers[0]);
+            assert((['left', 'center-x', 'right'].includes(mode) ? bounds.x : bounds.y) === expected,
+                `${mode} uses the correct edge/axis when layer sizes differ`);
+        }
+        const p = fixture();
+        p.layers[0].cells[9] = null;
+        const initial = JSON.stringify(p);
+        assert(alignmentPlan(p, 'center-x').needsApproval, 'Different parity widths require explicit half-cell approval');
+        rejects(() => alignLayers(p, 'center-x'), 'Unapproved half-cell alignment is blocked');
+        assert(JSON.stringify(p) === initial, 'Pending approval does not alter any layer');
+        alignLayers(p, 'center-x', true);
+        assert(layerBounds(p, p.layers[0]).x === 4, 'Approved horizontal half-cell alignment rounds right');
+        alignLayers(p, 'center-y', true);
+        assert(layerBounds(p, p.layers[0]).y === 4, 'Approved vertical half-cell alignment rounds down');
+        const negative = fixture();
+        negative.layers[1].cells.fill(null); negative.layers[1].cells[0] = '#000000';
+        alignLayers(negative, 'right');
+        assert(layerBounds(negative, negative.layers[0]).x === -1 && negative.layers[0].offCanvas.length === 1,
+            'Right-edge alignment preserves negative-position pixels instead of clipping');
+        alignLayers(negative, 'center-x', true);
+        assert(layerBounds(negative, negative.layers[0]).x === 0, 'Negative half-cell ties round toward the right');
+        p.selectedLayerIds = [p.layers[0].id];
+        rejects(() => alignLayers(p, 'left'), 'One selected layer requests multiple layers');
+        const grouped = fixture();
+        const folder = { id: 'align-folder', type: 'folder', name: 'F', parentId: null, visible: true, expanded: false };
+        grouped.layers.forEach(layer => { layer.parentId = folder.id; });
+        grouped.layers.unshift(folder); grouped.selectedLayerIds = [folder.id]; grouped.activeLayerId = folder.id;
+        assert(alignLayers(grouped, 'left') && layerBounds(grouped, grouped.layers[1]).x === 3,
+            'A single selected folder expands to its pixel layers, even while collapsed');
+        const locked = fixture();
+        locked.layers[0].locks.position = true;
+        const beforeLock = JSON.stringify(locked);
+        rejects(() => alignLayers(locked, 'left'), 'Position-locked moving layers block alignment');
+        assert(JSON.stringify(locked) === beforeLock, 'Blocked alignment is atomic');
+        locked.layers[0].locks.position = false; locked.layers[1].locks.all = true;
+        assert(alignLayers(locked, 'left'), 'A stationary locked anchor does not block alignment');
+        locked.layers.push(newLayer(8, 8, 'Blank'));
+        locked.selectedLayerIds.push(locked.layers.at(-1).id);
+        assert(alignmentPlan(locked, 'top').moves.length === 2, 'Blank selected layers are ignored as participants and anchors');
+        const outside = fixture(), layer = outside.layers[0];
+        Object.assign(layer, translateLayer(outside, layer, -20, 15));
+        assert(layer.cells.every(color => color === null) && layer.offCanvas.length === 2,
+            'Entirely off-canvas layer moves retain every source pixel');
+        assert(layerBounds(outside, layer).x === -20 && layerBounds(outside, layer).y === 15,
+            'Selection bounds include entirely off-canvas layers');
+        assert(flattenLayers(outside).filter(Boolean).length === 2,
+            'Off-canvas source pixels do not contribute to the exported canvas composite');
+        const saved = serializeLayers(outside);
+        validateLayers(saved);
+        const reopened = migrateLayers(structuredClone(saved));
+        Object.assign(reopened.layers[0], translateLayer(reopened, reopened.layers[0], 20, -15));
+        assert(reopened.layers[0].cells[0] === '#ff0000' && reopened.layers[0].cells[9] === '#ffffff' &&
+            reopened.layers[0].offCanvas.length === 0, 'Save/backup round trips retain pixels that can be moved back on canvas');
+        alignLayers(outside, 'left');
+        assert(outside.layers[0].offCanvas.length === 2 && layerBounds(outside, outside.layers[0]).x === 3,
+            'Alignment operates on off-canvas bounds without discarding still-hidden pixels');
+        const source = { width: 2, height: 1, cells: ['#ff0000', '#ffffff'] };
+        const moved = rasterLayerObject({ source, cx: -10, cy: 20.5, width: 2, height: 1, angle: 0 });
+        assert(JSON.stringify(moved) === JSON.stringify([[-11, 20, '#ff0000'], [-10, 20, '#ffffff']]),
+            'Unbounded layer rasterization preserves negative and off-board coordinates');
+        const rotated = rasterLayerObject({ source, cx: -10.5, cy: 20, width: 2, height: 1, angle: 90 });
+        assert(rotated.length === 2 && rotated.every(([x]) => x < 0), 'Layer rotation rasterization also preserves off-canvas pixels');
+        const extended = fixture();
+        Object.assign(extended.layers[0], translateLayer(extended, extended.layers[0], -2, 0));
+        transformLayers(extended, cells => extendCells(cells, 8, 8, { left: 3 }).cells, 11, 8, (x, y) => [x + 3, y]);
+        assert(extended.layers[0].cells[1] === '#ff0000' && !extended.layers[0].offCanvas.length,
+            'Extending the board reveals preserved outside pixels in the right positions');
+        const invalid = serializeLayers(outside);
+        invalid.layers[0].offCanvas = [[0, 0, '#ff0000']];
+        rejects(() => validateLayers(invalid), 'Invalid off-canvas entries inside the board are rejected');
+        invalid.layers[0].offCanvas = [[-1.5, 0, '#ff0000']];
+        rejects(() => validateLayers(invalid), 'Fractional saved layer coordinates are rejected');
+        const duplicate = fixture();
+        Object.assign(duplicate.layers[0], translateLayer(duplicate, duplicate.layers[0], -10, 0));
+        duplicate.selectedLayerIds = [duplicate.layers[0].id];
+        editLayerSelection(duplicate, 'copy');
+        const copied = activeLayer(duplicate);
+        copied.offCanvas[0][2] = '#000000';
+        assert(duplicate.layers.find(layer => layer.name === 'Moving').offCanvas[0][2] === '#ff0000',
+            'Off-canvas duplicate data is independent of its original');
+    }
+    const near = (a, b, epsilon = 1e-10) => a.length === b.length && a.every((value, i) => Math.abs(value - b[i]) < epsilon);
+    const blendExamples = {
+        Normal: 0.3, Dissolve: 0.3, Darken: 0.3, Multiply: 0.18,
+        'Color Burn': 0, 'Linear Burn': 0, 'Darker Color': 0.3,
+        Lighten: 0.6, Screen: 0.72, 'Color Dodge': 6 / 7, 'Linear Dodge': 0.9, 'Lighter Color': 0.6,
+        Overlay: 0.44, 'Soft Light': 0.504, 'Hard Light': 0.36, 'Vivid Light': 1 / 3,
+        'Linear Light': 0.2, 'Pin Light': 0.6, 'Hard Mix': 0,
+        Difference: 0.3, Exclusion: 0.54, Subtract: 0.3, Divide: 1,
+        Hue: 0.6, Saturation: 0.6, Color: 0.6, Luminosity: 0.3,
+    };
+    for (const mode of BLEND_MODES) {
+        assert(near(blendRgb([0.6, 0.6, 0.6], [0.3, 0.3, 0.3], mode), Array(3).fill(blendExamples[mode])),
+            `${mode} matches the guide's normalized single-channel example`);
+        const extremes = blendRgb([0, 0.5, 1], [1, 0, 0.5], mode);
+        assert(extremes.every(value => Number.isFinite(value) && value >= 0 && value <= 1),
+            `${mode} clamps extreme channel values without NaN`);
+    }
+    for (const [mode, expected] of [
+        ['Hue', [0.280, 0.537, 0.880]], ['Saturation', [0.850, 0.384, 0.150]],
+        ['Color', [0.244, 0.544, 0.944]], ['Luminosity', [0.756, 0.356, 0.156]],
+    ]) assert(near(blendRgb([0.8, 0.4, 0.2], [0.2, 0.5, 0.9], mode), expected, 0.001),
+        `${mode} matches the guide's whole-RGB worked example`);
+    assert(near(blendRgb([1, 0, 0.5], [0, 1, 0], 'Color Burn'), [1, 0, 0]) &&
+        near(blendRgb([0, 1, 0.5], [1, 0, 1], 'Color Dodge'), [0, 1, 1]),
+        'Burn and Dodge handle their specified corner-case precedence');
+    assert(near(blendRgb([0.1, 0.5, 0.9], [0, 0, 0], 'Divide'), [1, 1, 1]), 'Divide by zero produces white, not NaN');
+    assert(near(blendRgb([0.1, 0.1, 0.1], [0.8, 0.8, 0.8], 'Soft Light'), [0.2176, 0.2176, 0.2176]),
+        'Soft Light uses the guide polynomial below quarter luminance');
+    assert(near(blendRgb([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], 'Hard Mix'), [1, 1, 1]), 'Hard Mix includes the equality threshold');
+    assert(near(blendRgb([1, 0, 0], [0, 1, 0], 'Darker Color'), [1, 0, 0]) &&
+        near(blendRgb([1, 0, 0], [0, 1, 0], 'Lighter Color'), [1, 0, 0]), 'Whole-pixel comparison ties choose the base, not channel minima');
+    assert(near(blendRgb([0.2, 0.8, 0.4], [0.9, 0.1, 0.6], 'Color'),
+        blendRgb([0.9, 0.1, 0.6], [0.2, 0.8, 0.4], 'Luminosity')), 'Color and swapped Luminosity are equivalent');
+    assert(near(blendPixel([0.6, 0.6, 0.6, 1], [0.3, 0.3, 0.3, 1], 'Multiply', 0.5), [0.39, 0.39, 0.39, 1]),
+        'Opacity mixes the blended result back into the base');
+    assert(near(blendPixel([0.2, 0.4, 0.6, 0.5], [0.8, 0.6, 0.4, 1], 'Multiply', 0.5),
+        [0.38666666666666666, 0.41333333333333333, 0.41333333333333333, 0.75]),
+        'Semi-transparent backdrops use the general W3C alpha formula');
+    assert(near(blendPixel([0, 0, 0, 0], [1, 0, 0, 1], 'Multiply', 0.5), [1, 0, 0, 0.5]),
+        'A transparent backdrop does not darken a Multiply source');
+    assert(blendPixel([0, 1, 0, 1], [1, 0, 0, 0.5], 'Dissolve', 1, 0.25)[3] === 1 &&
+        blendPixel([0, 1, 0, 1], [1, 0, 0, 0.5], 'Dissolve', 1, 0.75)[1] === 1,
+        'Dissolve uses binary coverage including source alpha, not partial blending');
+    assert(pixelColor([1, 0, 0, 0.5], true) === '#ff8080' && pixelWord([1, 0, 0, 0.5]) === 0x800000ff,
+        'Yarn appearance on white and native RGBA alpha use the correct final rounding');
+    rejects(() => blendRgb([0, 0, 0], [1, 1, 1], 'Unknown'), 'Unknown blend formulas fail explicitly');
+    const blendProject = migrateLayers({ cols: 1, rows: 1, cells: ['#cccccc'] });
+    const blendTop = newLayer(1, 1, 'Blend source', ['#808080']);
+    blendTop.blendMode = 'Multiply';
+    blendProject.layers.unshift(blendTop);
+    blendProject.activeLayerId = blendTop.id;
+    bindLayer(blendProject);
+    assert(flattenLayers(blendProject)[0] === '#666666' && compositeColor(blendProject, 0) === '#666666',
+        'Canvas and flattened data use the same bottom-to-top blend result');
+    blendTop.opacity = 0.5;
+    assert(flattenLayers(blendProject)[0] === '#999999', 'Layer opacity modifies the composite without changing source pixels');
+    assert(blendTop.cells[0] === '#808080' && blendProject.cells === blendTop.cells, 'Blending leaves editable source data and the active alias intact');
+    assert(compositeColor(blendProject, 0, new Map([[0, '#ffffff']])) === '#cccccc' &&
+        compositeColor(blendProject, 0, new Map([[0, '#000000']])) === '#666666',
+        'Floating edits use the active blend mode and opacity at the correct stack depth');
+    blendTop.locks.transparency = true;
+    assert(compositeColor(blendProject, 0, new Map([[0, null]])) === '#999999',
+        'A locked erase preview does not alter a blended layer');
+    blendTop.locks.transparency = false;
+    blendProject.layers[1].visible = false;
+    assert(createLayerCompositor(blendProject)(0)[3] === 0.5 && flattenLayers(blendProject)[0] === '#c0c0c0',
+        'Hidden backdrops are excluded and partial-alpha compatibility previews use white');
+    blendTop.opacity = 0;
+    assert(flattenLayers(blendProject)[0] === null && flattenPixels(blendProject)[0] === 0, 'Zero opacity produces truly transparent pixels');
+    delete blendTop.opacity;
+    assert(migrateLayers(blendProject).layers[0].opacity === 1, 'Older layer projects default missing opacity to 100 percent');
+    const precisionProject = migrateLayers({ cols: 1, rows: 1, cells: ['#010101'] });
+    const middle = newLayer(1, 1, 'Middle', ['#020202']), foreground = newLayer(1, 1, 'Front', ['#030303']);
+    middle.opacity = foreground.opacity = 0.5;
+    precisionProject.layers.unshift(foreground, middle);
+    assert(flattenLayers(precisionProject)[0] === '#020202', 'Intermediate layers retain floating precision rather than rounding each stage');
+    const cacheProject = migrateLayers({ cols: 40, rows: 30,
+        cells: Array.from({ length: 1200 }, (_, i) => '#' + i.toString(16).padStart(6, '0')) });
+    const cacheTop = newLayer(40, 30, 'Cache coverage', Array(1200).fill('#808080'));
+    cacheTop.blendMode = 'Screen'; cacheTop.opacity = 0.6;
+    cacheProject.layers.unshift(cacheTop);
+    const cacheComposite = createLayerCompositor(cacheProject);
+    assert(cacheProject.layers[1].cells.every((color, i) => {
+        const base = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16) / 255);
+        const expected = base.map(b => b * 0.4 + (1 - (1 - b) * (1 - 128 / 255)) * 0.6);
+        return near(cacheComposite(i), [...expected, 1]);
+    }), 'Blend cache eviction preserves results beyond 1024 unique backdrops');
+    const weightedLum = c => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2];
+    for (const mode of ['Hue', 'Saturation', 'Color', 'Luminosity']) {
+        const base = [1, 1, 0], source = [0, 0, 1], mixed = blendRgb(base, source, mode);
+        const expectedLum = weightedLum(mode === 'Luminosity' ? source : base);
+        assert(mixed.every(v => v >= 0 && v <= 1) && Math.abs(weightedLum(mixed) - expectedLum) < 1e-10,
+            `${mode} clips out-of-gamut channels while retaining the required luminosity`);
+    }
+    const dissolveProject = migrateLayers({ cols: 100, rows: 100, cells: Array(10000).fill('#ff0000') });
+    const dissolveLayer = activeLayer(dissolveProject);
+    dissolveLayer.id = dissolveProject.activeLayerId = 'dissolve-test-layer';
+    dissolveLayer.blendMode = 'Dissolve'; dissolveLayer.opacity = 0.37;
+    const dither = flattenPixels(dissolveProject), repeatedDither = flattenPixels(structuredClone(dissolveProject));
+    const coverage = dither.reduce((sum, word) => sum + Number(word !== 0), 0);
+    assert(coverage > 3500 && coverage < 3900 && dither.every((word, i) => word === repeatedDither[i]),
+        'Dissolve coverage follows opacity and is identical after serialization/re-render');
+    assert(dither.every(word => word === 0 || word === 0xff0000ff), 'Dissolve emits only opaque source or transparent cells');
+    assert(dissolveNoise(layerSeed('same-layer'), 42) === dissolveNoise(layerSeed('same-layer'), 42) &&
+        dissolveNoise(layerSeed('same-layer'), 42) !== dissolveNoise(layerSeed('other-layer'), 42), 'Dissolve is seeded per layer and cell');
+    dissolveLayer.opacity = 1;
+    assert(flattenPixels(dissolveProject).every(word => word === 0xff0000ff), 'Dissolve at full opacity is exactly Normal');
+    dissolveLayer.opacity = 0;
+    assert(flattenPixels(dissolveProject).every(word => word === 0), 'Dissolve at zero opacity contributes nothing');
     const pixels = colors => Uint8ClampedArray.from(colors.flatMap(color => color === null
         ? [0, 0, 0, 0] : [parseInt(color.slice(1, 3), 16), parseInt(color.slice(3, 5), 16), parseInt(color.slice(5, 7), 16), 255]));
     const stripes = ['#550000', '#990000', '#dd0000', '#ff5555'].flatMap(color => Array(20).fill(color));
@@ -322,13 +723,254 @@ try {
     assert(validateProject({ ...record, palette: [] }).palette.length === 0, 'Empty palettes accepted for new projects');
     rejects(() => validateProject({ ...record, palette: ['red'] }), 'Invalid palette colors rejected');
     rejects(() => validateProject({ ...record, width: 2, height: 1 }), 'Mismatched grid proportions rejected');
-    rejects(() => validateProject({ ...record, version: 2 }), 'Unknown project version rejected');
+    rejects(() => validateProject({ ...record, version: 3 }), 'Unknown project version rejected');
+    const layered = migrateLayers(structuredClone(record));
+    const bottomLayer = activeLayer(layered);
+    assert(layered.version === 2 && layered.layers.length === 1 && bottomLayer.cells !== record.cells &&
+        bottomLayer.cells[0] === '#000000', 'Legacy projects migrate without losing or aliasing their original pixels');
+    assert(layered.cells === bottomLayer.cells && migrateLayers(layered).layers.length === 1,
+        'Migration binds the active cells and is idempotent');
+    const topLayer = newLayer(2, 2, 'Top', ['#ff0000', '#00ff00', null, null]);
+    layered.layers.unshift(topLayer);
+    layered.activeLayerId = topLayer.id;
+    bindLayer(layered);
+    assert(layered.cells === topLayer.cells && copyCells(layered, { cx: 1, cy: 1, width: 2, height: 2 }).cells[0] === '#ff0000',
+        'Painting and copying address the active layer, not the composite');
+    assert(flattenLayers(layered).join() === '#ff0000,#00ff00,,', 'Topmost painted layer cells win in the composite');
+    topLayer.visible = false;
+    assert(compositeColor(layered, 0) === '#000000' && flattenLayers(layered)[1] === null, 'Hidden layers do not render');
+    topLayer.visible = true;
+    assert(compositeColor(layered, 0, new Map([[0, '#ffffff']])) === '#ffffff', 'Placement previews render at the active layer depth');
+    assert(compositeColor(layered, 0, new Map([[1, '#ffffff']]), true) === '#000000',
+        'Layer transform previews replace old pixels and reveal lower layers');
+    layered.activeLayerId = bottomLayer.id;
+    assert(compositeColor(layered, 0, new Map([[0, '#ffffff']])) === '#ff0000', 'Upper layers occlude a lower-layer edit preview');
+    layered.activeLayerId = topLayer.id;
+    bindLayer(layered);
+    const folder = { id: crypto.randomUUID(), type: 'folder', name: 'Group', parentId: null, visible: true, expanded: true };
+    topLayer.parentId = folder.id;
+    layered.layers = [folder, bottomLayer, topLayer];
+    assert(layerOrder(layered).map(item => item.id).join() === [folder.id, topLayer.id, bottomLayer.id].join(),
+        'Folders display children indented in top-first compositing order');
+    folder.visible = false;
+    assert(!layerVisible(layered, topLayer) && flattenLayers(layered)[0] === '#000000', 'Folder visibility hides all its children');
+    folder.visible = true;
+    folder.expanded = false;
+    assert(flattenLayers(layered)[0] === '#ff0000', 'Collapsing a folder does not hide its pixels');
+    const serialized = serializeLayers(layered);
+    assert(serialized.cells !== topLayer.cells && serialized.cells[0] === '#ff0000' &&
+        layered.cells === topLayer.cells && validateProject(serialized) === serialized,
+        'Version 2 backups retain layers and flatten only the compatibility preview');
+    const serializedClone = structuredClone(serialized);
+    serializedClone.layers.find(layer => layer.id === topLayer.id).cells[0] = '#abcdef';
+    assert(topLayer.cells[0] === '#ff0000', 'Saved snapshots do not alias live layer cells');
+    layered.activeLayerId = folder.id;
+    bindLayer(layered);
+    assert(activeLayer(layered) === folder && layered.cells.every(cell => cell === null), 'Selecting a folder cannot paint a raster layer');
+    layered.activeLayerId = topLayer.id;
+    bindLayer(layered);
+    for (let mask = 0; mask < 16; mask++) {
+        const locked = newLayer(2, 1, 'Locks', ['#000000', null]);
+        LOCKS.forEach((key, index) => { locked.locks[key] = Boolean(mask & (1 << index)); });
+        const { all, transparency, color, position } = locked.locks;
+        assert(canWrite(locked, '#000000') === (!all && !color) &&
+            canWrite(locked, null) === (!all && !transparency), `Layer write lock matrix ${mask}`);
+        assert(writeLayerCell(locked, 0, null) === (!all && !color && !transparency) &&
+            writeLayerCell(locked, 1, '#ffffff') === (!all && !transparency), `Layer erase/paint lock matrix ${mask}`);
+        assert(canTransform(locked) === (!all && !position), `Layer position lock matrix ${mask}`);
+    }
+    topLayer.locks.transparency = true;
+    assert(compositeColor(layered, 0, new Map([[0, null]])) === '#ff0000' &&
+        compositeColor(layered, 3, new Map([[3, '#ffffff']])) === null,
+        'Transparency-locked previews cannot erase painted pixels or fill empty pixels');
+    topLayer.locks.transparency = false;
+    assert(JSON.stringify(layerBounds(layered, topLayer)) === '{"x":0,"y":0,"width":2,"height":1}',
+        'Layer selection uses the painted bounding box');
+    assert(layerBounds(layered, newLayer(2, 2)).height === 2, 'Blank layer selection covers the full grid');
+    topLayer.locks.all = true;
+    transformLayers(layered, cells => extendCells(cells, 2, 2, { left: 1 }).cells, 3, 2);
+    assert(layered.layers.find(layer => layer.id === topLayer.id).cells[1] === '#ff0000' &&
+        layered.layers.find(layer => layer.id === bottomLayer.id).cells[1] === '#000000' &&
+        activeLayer(layered).locks.all && layered.cells === activeLayer(layered).cells,
+        'Whole-canvas edits transform every layer, preserve locks, and rebind active cells');
+    rejects(() => transformLayers({ layers: Array(17).fill({ type: 'layer' }) }, () => [], 500, 500),
+        'Grid transforms enforce the four-million-layer-cell limit before mutation');
+    assert(MAX_LAYERS === 64 && MAX_LAYER_CELLS === 4000000 && BLEND_MODES.length === 27 &&
+        BLEND_MODES.includes('Linear Dodge') && BLEND_MODES.includes('Luminosity'), 'Layer limits and requested blend mode list are exact');
+    for (const [label, change] of [
+        ['duplicate IDs', data => { data.layers[1].id = data.layers[0].id; }],
+        ['missing active layer', data => { data.activeLayerId = 'missing'; }],
+        ['missing parent', data => { data.layers[2].parentId = 'missing'; }],
+        ['self-parent folder', data => { data.layers[0].parentId = data.layers[0].id; }],
+        ['unknown blend', data => { data.layers[1].blendMode = 'unknown'; }],
+        ['negative opacity', data => { data.layers[1].opacity = -0.01; }],
+        ['excess opacity', data => { data.layers[1].opacity = 1.01; }],
+        ['non-numeric opacity', data => { data.layers[1].opacity = '0.5'; }],
+        ['invalid locks', data => { data.layers[1].locks.all = 1; }],
+        ['wrong cell count', data => { data.layers[1].cells = []; }],
+        ['invalid color', data => { data.layers[1].cells[0] = 'red'; }],
+        ['empty name', data => { data.layers[1].name = ' '; }],
+        ['too many entries', data => { data.layers = Array(65).fill(data.layers[0]); }],
+    ]) {
+        const invalid = structuredClone(serialized);
+        change(invalid);
+        rejects(() => validateLayers(invalid), `Invalid layer schema rejects ${label}`);
+    }
+    {
+        const object = { cx: 12, cy: 12, width: 4, height: 4, angle: 0 };
+        const target = { x: 40, y: 30, width: 20, height: 20 };
+        for (const [axis, delta, value] of [['x', 30, 40], ['x', 38, 50], ['x', 46, 60],
+            ['y', 20, 30], ['y', 28, 40], ['y', 36, 50]]) {
+            const result = snapTranslation(object, axis === 'x' ? delta + 0.6 : 0,
+                axis === 'y' ? delta + 0.6 : 0, [target], 100, 100);
+            assert(result[axis === 'x' ? 'dx' : 'dy'] === delta &&
+                result.guides.some(guide => guide.axis === axis && guide.value === value),
+                `Dragging snaps ${axis} edge/center metric ${value}`);
+        }
+        const board = [{ x: 0, y: 0, width: 100, height: 60 }];
+        const near = snapTranslation(object, -7.01, 0, board, 100, 60);
+        assert(near.dx === -10 && near.guides.some(g => g.axis === 'x' && g.value === 0),
+            'Canvas left edge snaps inside the 3% horizontal threshold');
+        const far = snapTranslation(object, -6.99, 0, board, 100, 60);
+        assert(far.dx === -7 && !far.guides.length, 'Dragging past 3% releases snapping using raw pointer distance');
+        assert(snapTranslation(object, 0, -8.21, board, 100, 60).dy === -10 &&
+            snapTranslation(object, 0, -8.19, board, 100, 60).dy === -8,
+            'Vertical tolerance is 3% of height, not width');
+        for (const [dx, dy, x, y] of [[38.8, 18.8, 50, 30], [86.8, 46.8, 100, 60]]) {
+            const snapped = snapTranslation(object, dx, dy, board, 100, 60);
+            assert(snapped.guides.some(g => g.axis === 'x' && g.value === x) &&
+                snapped.guides.some(g => g.axis === 'y' && g.value === y),
+                `Canvas axes/outer edges snap simultaneously at ${x},${y}`);
+        }
+        const odd = snapTranslation({ ...object, width: 3, cx: 11.5 }, 38.5, 0,
+            [{ x: 50, y: 0, width: 0, height: 0 }], 10, 60);
+        assert(Number.isInteger(odd.dx) && odd.guides.every(g => g.axis !== 'x'),
+            'Incompatible half-cell centers never introduce fractional pixel translations');
+        const nearest = snapTranslation(object, 27.1, 0, [target, { x: 39, y: 80, width: 20, height: 10 }], 100, 100);
+        assert(nearest.dx === 27 && nearest.guides[0].value === 39, 'Nearest metric wins rather than first target');
+        assert(snapTranslation(object, -110.9, 0, [{ x: -100, y: 0, width: 20, height: 20 }], 100, 60).dx === -110,
+            'Snapping supports negative off-canvas coordinates');
+    }
+    const placementFixture = document.createElement('div');
+    placementFixture.style.cssText = 'position:absolute;left:-10000px;top:0;width:200px;height:150px';
+    placementFixture.innerHTML = `
+        <div id="workspace"><canvas id="placement-test-canvas" width="200" height="150"></canvas></div>
+        <div id="object-overlay"><svg id="object-outline"><line id="line-hit"/><polygon id="box-hit" data-edit="move"/></svg>
+          <button data-edit="a"></button><button data-edit="b"></button>
+          <button data-edit="resize" data-resize="nw"></button><button data-edit="resize" data-resize="ne"></button>
+          <button data-edit="resize" data-resize="se"></button><button data-edit="resize" data-resize="sw"></button>
+          <button data-edit="rotate"></button><span id="object-dimensions"></span></div>
+        <p id="object-help"></p><input id="object-width"><input id="object-height"><input id="object-angle">
+        <select id="shape-type"><option>rectangle</option></select><select id="shape-fill"><option>filled</option></select>
+        <button id="placement-apply"></button><button id="placement-cancel"></button>`;
+    document.body.append(placementFixture);
+    try {
+        const placementProject = migrateLayers({ cols: 3, rows: 2, cells: ['#ff0000', null, null, null, null, null] });
+        const placementLayer = activeLayer(placementProject), testCanvas = document.getElementById('placement-test-canvas');
+        let lastNotice = '', commitCount = 0, replacement = false, snapping = true;
+        const editor = createPlacementEditor({
+            canvas: testCanvas, getProject: () => placementProject, getColor: () => '#ffffff', getStroke: () => 1,
+            canTransform: () => canTransform(placementLayer), updateControls() {},
+            getSnapping: () => snapping,
+            redraw: () => editor.render(), notify: text => { lastNotice = text; },
+            commitPixels(pixels, replace = false) {
+                commitCount++;
+                replacement = replace;
+                let changed = false;
+                if (replace) {
+                    for (let i = 0; i < placementLayer.cells.length; i++) {
+                        const color = pixels.get(i) ?? null;
+                        if (placementLayer.cells[i] !== color) changed = true;
+                        placementLayer.cells[i] = color;
+                    }
+                } else for (const [index, color] of pixels) changed = writeLayerCell(placementLayer, index, color) || changed;
+                return changed;
+            },
+        });
+        const key = name => editor.keydown({ key: name, target: testCanvas, preventDefault() {} });
+        const selectPixels = () => editor.selectLayer(layerBounds(placementProject, placementLayer));
+        selectPixels();
+        assert(editor.layerSelected && editor.selecting && !editor.preview().size && !editor.transformingLayer,
+            'Layer selection alone has no paint preview or data mutation');
+        key('ArrowRight');
+        assert(editor.transformingLayer && editor.preview().get(1) === '#ff0000' && placementLayer.cells[0] === '#ff0000',
+            'Arrow transforms remain disposable previews until committed');
+        editor.cancel();
+        assert(!editor.active && placementLayer.cells[0] === '#ff0000' && !commitCount, 'Cancelling a layer transform leaves its cells unchanged');
+        selectPixels();
+        key('ArrowRight');
+        editor.commit();
+        assert(replacement && placementLayer.cells[0] === null && placementLayer.cells[1] === '#ff0000' && commitCount === 1,
+            'Committing a layer transform replaces rather than duplicates its pixels');
+        placementLayer.locks.position = true;
+        selectPixels();
+        key('ArrowDown');
+        const width = document.getElementById('object-width');
+        width.value = '2';
+        width.dispatchEvent(new Event('change'));
+        assert(!editor.transformingLayer && !editor.preview().size && width.value === '1' && lastNotice.includes('position-locked'),
+            'Position lock blocks both keyboard and numeric layer transforms');
+        editor.commit();
+        assert(commitCount === 1, 'Committing an unchanged layer selection creates no pixel edit');
+        placementLayer.locks.position = false;
+        selectPixels();
+        key('ArrowRight');
+        editor.copy();
+        assert(placementLayer.cells[1] === null && placementLayer.cells[2] === '#ff0000' && width.value === '1',
+            'Copy finalizes a transformed layer and retains its painted bounds');
+        editor.paste();
+        assert(editor.kind === 'paste' && width.value === '1', 'Layer clipboard content pastes with its actual bounds, not whole-board padding');
+        editor.cancel(true);
+        placementLayer.locks.all = true;
+        selectPixels();
+        editor.copy();
+        assert(editor.canPaste, 'Fully locked layers can still be selected and copied');
+        editor.cut();
+        assert(placementLayer.cells[2] === '#ff0000' && lastNotice.includes('no pixels were cut'), 'Cut respects pixel locks and reports that it did not erase');
+        selectPixels();
+        key('Delete');
+        assert(placementLayer.cells[2] === '#ff0000' && lastNotice.includes('No pixels were deleted'), 'Delete respects pixel locks and reports a blocked edit');
+        editor.cancel(true);
+        placementLayer.locks.all = false;
+        placementProject.cols = 100; placementProject.rows = 60;
+        placementLayer.cells = Array(6000).fill(null);
+        placementLayer.cells[1010] = '#ff0000'; placementLayer.cells[1313] = '#ff0000';
+        bindLayer(placementProject);
+        selectPixels();
+        const overlay = document.getElementById('object-overlay'), hit = document.getElementById('box-hit');
+        overlay.setPointerCapture = () => {};
+        overlay.hasPointerCapture = () => false;
+        const rect = testCanvas.getBoundingClientRect();
+        const pointer = (type, x, y = 12) => new PointerEvent(type, { bubbles: true, pointerId: 7,
+            isPrimary: true, button: 0, clientX: rect.left + x / 100 * rect.width, clientY: rect.top + y / 60 * rect.height });
+        hit.dispatchEvent(pointer('pointerdown', 12));
+        overlay.dispatchEvent(pointer('pointermove', 4.9));
+        assert(hit.getAttribute('points').startsWith('0,10') && overlay.querySelectorAll('.snap-guides line').length === 1,
+            'Pointer layer drag shows a guide and snapped preview without committing');
+        snapping = false; editor.refreshSnapping();
+        assert(hit.getAttribute('points').startsWith('3,10') && !overlay.querySelector('.snap-guides line'),
+            'Turning snapping off immediately restores the unsnapped pointer preview');
+        snapping = true; editor.refreshSnapping();
+        overlay.dispatchEvent(pointer('pointermove', 5.1));
+        assert(hit.getAttribute('points').startsWith('3,10') && !overlay.querySelector('.snap-guides line'),
+            'Dragging beyond the magnetic range releases the layer');
+        overlay.dispatchEvent(pointer('pointermove', 4.9));
+        overlay.dispatchEvent(pointer('pointerup', 4.9));
+        assert(hit.getAttribute('points').startsWith('0,10') && !overlay.querySelector('.snap-guides line'),
+            'Pointer release retains snapped position and clears temporary guides');
+        editor.cancel(true);
+        assert(placementLayer.cells[1010] === '#ff0000', 'Cancelling a snapped drag preserves original layer pixels');
+    } finally { placementFixture.remove(); }
     const paddedRecord = { ...record, width: 3, height: 2, cols: 3, rows: 2, cells: Array(6).fill(null), referenceRect: { x: 1, y: 0, width: 2, height: 2 } };
     assert(validateProject(paddedRecord) === paddedRecord, 'Padded boards with a placed reference accepted');
     assert(validateProject({ ...paddedRecord, width: 2.4, referenceRect: { x: 0.4, y: 0, width: 2, height: 2 } }), 'Fractional padded boards accepted');
     rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 2, y: 0, width: 2, height: 2 } }), 'Reference outside the board rejected');
     rejects(() => validateProject({ ...paddedRecord, referenceRect: { x: 0, y: 0, width: 1.5, height: 2 } }), 'Non-integer reference size rejected');
     store = await openStore(database);
+    await store.run('readwrite', table => table.put(serializedClone));
+    const layersSaved = await store.run('readonly', table => table.get(record.id));
+    assert(layersSaved.version === 2 && layersSaved.layers.length === 3 &&
+        migrateLayers(layersSaved).cells[0] === '#abcdef', 'Layer names, hierarchy, active selection and pixels survive IndexedDB');
     await store.run('readwrite', table => table.put(blankRecord));
     const blankSaved = await store.run('readonly', table => table.get(record.id));
     assert(blankSaved.blank && blankSaved.cells.every(cell => cell === null) && !blankSaved.palette.length,
