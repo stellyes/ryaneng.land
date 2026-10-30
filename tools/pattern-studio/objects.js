@@ -73,9 +73,14 @@ export function strokeWidth(value) {
 }
 
 // Square brush centered on (x, y); even widths extend one extra cell right/down.
-export function brush(x, y, size, visit) {
+export function brushBounds(x, y, size) {
     const width = strokeWidth(size), offset = Math.floor((width - 1) / 2);
-    for (let dy = 0; dy < width; dy++) for (let dx = 0; dx < width; dx++) visit(x - offset + dx, y - offset + dy);
+    return { x: x - offset, y: y - offset, width, height: width };
+}
+
+export function brush(x, y, size, visit) {
+    const bounds = brushBounds(x, y, size);
+    for (let dy = 0; dy < bounds.height; dy++) for (let dx = 0; dx < bounds.width; dx++) visit(bounds.x + dx, bounds.y + dy);
 }
 
 export function shapeMask(shape, width, height, filled, stroke = 1) {

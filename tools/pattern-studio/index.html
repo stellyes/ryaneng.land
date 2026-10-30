@@ -69,6 +69,24 @@
           <span class="tool-tooltip" aria-hidden="true">Shapes</span>
         </span>
       </div>
+      <div class="tool-group" role="group" aria-label="Color adjustment tools">
+        <span class="tool-control">
+          <button class="icon-button" data-tool="dodge" aria-label="Dodge" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="5"/><path d="m12 12 8 9M9 1v2M2 8H0M3 2l2 2M15 2l-2 2"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Dodge — lighten</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="burn" aria-label="Burn" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 6 7 8 7 13a7 7 0 0 1-14 0c0-3 2-6 4-8 0 4 2 5 3 6 2-3 2-6 0-11Z"/><path d="M10 17h4"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Burn — darken</span>
+        </span>
+        <span class="tool-control">
+          <button class="icon-button" data-tool="sponge" aria-label="Sponge" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5c4-3 7 1 11-1 3-2 6 0 7 2v12c-3 3-6-1-10 1-4 2-7 0-8-2Z"/><circle cx="8" cy="9" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="12" cy="14" r="2"/><path d="M6 15h1M17 15h1"/></svg></button>
+          <span class="tool-tooltip" aria-hidden="true">Sponge — saturation</span>
+        </span>
+      </div>
+      <span class="tool-control">
+        <button class="icon-button" data-tool="text" aria-label="Text" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6V3h16v3M12 3v18M8 21h8"/></svg></button>
+        <span class="tool-tooltip" aria-hidden="true">Text layer</span>
+      </span>
       <div class="tool-group" role="group" aria-label="Canvas tools">
         <span class="tool-control">
           <button class="icon-button" data-tool="move" aria-label="Move" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 5V3a1.5 1.5 0 0 1 3 0v8M14 5a1.5 1.5 0 0 1 3 0v7M17 8a1.5 1.5 0 0 1 3 0v7c0 4-2 7-6 7h-1c-2 0-3.5-1-5-3l-4-6a1.5 1.5 0 0 1 2.5-1.7L8 14"/></svg></button>
@@ -116,7 +134,7 @@
         </span>
       </div>
       <label class="check"><input id="reference-toggle" type="checkbox" checked disabled> Reference</label>
-      <label class="check" title="Gridlines appear when cells are at least 10 screen pixels wide and tall."><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
+      <label class="check" title="Gridlines appear when cells are at least 6 screen pixels wide and tall."><input id="lines-toggle" type="checkbox" checked disabled> Gridlines</label>
       <label class="check" title="Snap dragged layers to visible layers and canvas edges or centers within 3% of the canvas size."><input id="snapping-toggle" type="checkbox" checked disabled> Snapping</label>
     </section>
     <div class="workspace-area">
@@ -136,6 +154,16 @@
         <input id="stroke-width" type="number" min="1" max="20" step="1" value="1" aria-describedby="stroke-help">
         <span id="stroke-help">cells</span>
       </div>
+      <div id="adjustment-options" hidden>
+        <div class="stroke-options">
+          <label for="adjustment-intensity">Intensity (%)</label>
+          <input id="adjustment-range" type="range" min="0" max="100" step="1" value="50" aria-label="Adjustment intensity slider">
+          <input id="adjustment-intensity" type="number" min="0" max="100" step="1" value="50">
+        </div>
+        <label id="tone-options">Tonal range <select id="tone-range"><option value="shadows">Shadows</option><option value="midtones" selected>Midtones</option><option value="highlights">Highlights</option></select></label>
+        <label id="sponge-options" hidden>Mode <select id="sponge-mode"><option value="saturate">Saturate</option><option value="desaturate">Desaturate</option></select></label>
+        <p class="fine">Adjusts existing painted pixels only. Release and brush again to build the effect.</p>
+      </div>
       <div id="object-transform">
         <label>Width <input id="object-width" type="number" min="1" max="500" step="1" value="1" disabled></label>
         <label>Height <input id="object-height" type="number" min="1" max="500" step="1" value="1" disabled></label>
@@ -146,6 +174,23 @@
         <button id="placement-cancel" disabled>Cancel</button>
       </div>
       <p id="object-help">Drag on the grid to start. Adjust handles, then click away or Apply to finalize. Enter applies; Escape or Delete cancels.</p>
+    </section>
+    <section id="text-settings" aria-label="Text layer options" hidden>
+      <button id="text-new" type="button" disabled>New text layer</button>
+      <label for="text-content">Text</label>
+      <textarea id="text-content" maxlength="1000" rows="3" spellcheck="false" disabled></textarea>
+      <label id="text-font-label" for="text-font-toggle">Font</label>
+      <select id="text-font" hidden disabled aria-label="Font"></select>
+      <div id="text-font-picker">
+        <button id="text-font-toggle" type="button" aria-labelledby="text-font-label text-font-current" aria-haspopup="listbox" aria-expanded="false" aria-controls="text-font-options" disabled><span id="text-font-current">Choose font</span><span aria-hidden="true">&#9662;</span></button>
+        <div id="text-font-options" role="listbox" aria-labelledby="text-font-label" hidden></div>
+      </div>
+      <label for="text-size">Font size (cells)</label>
+      <input id="text-size" type="number" min="1" max="500" step="1" value="16" disabled>
+      <label for="text-color">Text color</label>
+      <input id="text-color" type="color" value="#000000" disabled>
+      <p class="fine">SVG outlines stay editable. Drag the text box to move; corners scale, outside corners rotate. Press Enter in the text field for a new line.</p>
+      <button id="text-rasterize" type="button" disabled>Rasterize to pixels</button>
     </section>
     <section id="grid-settings" class="grid-settings" hidden>
       <label for="grid-number">Cells on longest side</label>
@@ -220,6 +265,7 @@
       <div id="canvas-wrap" hidden>
         <div id="canvas-stage">
           <canvas id="canvas" tabindex="0" aria-label="Pattern editor. Use arrow keys to choose a cell and Space to paint or sample. With Move selected, drag or use arrow keys to pan." aria-describedby="help"></canvas>
+          <div id="brush-preview" aria-hidden="true" hidden><div id="brush-outline"></div></div>
           <div id="object-overlay" hidden>
             <svg id="object-outline" preserveAspectRatio="none" aria-hidden="true" focusable="false">
               <line id="line-hit" data-edit="move" focusable="false"/>
@@ -227,12 +273,14 @@
             </svg>
             <button class="object-handle" data-edit="a" aria-label="Adjust line start"></button>
             <button class="object-handle" data-edit="b" aria-label="Adjust line end"></button>
+            <button class="rotation-zone" data-edit="rotate" data-rotate="nw" aria-label="Rotate from top-left corner"></button>
+            <button class="rotation-zone" data-edit="rotate" data-rotate="ne" aria-label="Rotate from top-right corner"></button>
+            <button class="rotation-zone" data-edit="rotate" data-rotate="se" aria-label="Rotate from bottom-right corner"></button>
+            <button class="rotation-zone" data-edit="rotate" data-rotate="sw" aria-label="Rotate from bottom-left corner"></button>
             <button class="object-handle" data-edit="resize" data-resize="nw" aria-label="Resize top-left"></button>
             <button class="object-handle" data-edit="resize" data-resize="ne" aria-label="Resize top-right"></button>
             <button class="object-handle" data-edit="resize" data-resize="se" aria-label="Resize bottom-right"></button>
             <button class="object-handle" data-edit="resize" data-resize="sw" aria-label="Resize bottom-left"></button>
-            <button class="object-handle rotation-handle" data-edit="rotate" aria-label="Rotate around center">&#8635;</button>
-            <span id="object-dimensions"></span>
           </div>
           <div id="crop-overlay" hidden>
             <div id="crop-frame" tabindex="0" role="group" aria-label="Crop frame" aria-describedby="crop-help">
@@ -293,7 +341,7 @@
       <span>Zoom Controls</span>
       <button id="zoom-out" aria-label="Zoom out" aria-describedby="zoom-help" title="Zoom out (Ctrl/Cmd+-)" disabled>&minus;</button>
       <button id="zoom-in" aria-label="Zoom in" aria-describedby="zoom-help" title="Zoom in (Ctrl/Cmd++)" disabled>+</button>
-      <span id="zoom-help" class="visually-hidden">Scroll to explore when zoomed in. Display only; exports stay unchanged.</span>
+      <span id="zoom-help" class="visually-hidden">Zoom from 35% to 800% of fit-to-frame. Scroll or pan beyond any edge to center the outermost cells. Display only; exports stay unchanged.</span>
     </section>
     </div>
     </div>

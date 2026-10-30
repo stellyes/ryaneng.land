@@ -37,10 +37,57 @@ tool options, layers, and a magnifier button for zoom controls.
   or try the built-in sample. The stored reference is resized to a longest edge
   of at most 500 pixels.
 - The icon toolbar is divided into Drawing (Paint, Bucket fill, Eraser, Line,
-  Shapes), Canvas (Move, Color sampler, Grid size, Crop), Selection/clipboard
+  Shapes), Color adjustments (Dodge, Burn, Sponge), Text,
+  Canvas (Move, Color sampler, Grid size, Crop), Selection/clipboard
   (Select, Copy, Paste, Cut), and History (Undo, Redo) groups.
   Hover or keyboard-focus an icon for its plain-text tooltip; each button also
   has an accessible name. Erase block has been removed.
+- **Text** creates a separate editable text layer, marked **T** in the layer
+  list. If the active layer is already text, the tool reopens its options;
+  **New text layer** creates another. Tool options contain a multiline text
+  field, a font dropdown populated from [the font catalog](assets/fonts/index.json),
+  font size in cells (1-500), and text color. Enter inside the text field adds
+  a line. Each font name in the picker, including the selected name, previews
+  its actual SVG glyphs at a uniform 20px lettering height, without font-metric
+  whitespace. Use arrow keys to browse, Enter to select, and Escape
+  to close the picker.
+  Text is limited to 1000 characters. New layers start with "Text",
+  a size suited to the grid, and the selected palette color (or black).
+  - The bundled fonts are read directly as SVG fonts, not substituted with
+    browser/system fonts. Glyph outlines, advances, multi-character glyphs,
+    Unicode normalization, and explicit kerning pairs are used. Missing
+    characters display the font's fallback box and an explicit warning.
+    Complex script shaping, bidirectional layout, automatic wrapping, and
+    additional typographic controls are not included in this iteration.
+  - Text is rendered into stitch/pixel cells, with half-covered cells counted
+    as painted. Original SVG outlines remain stored separately: changing font
+    size, scaling a corner, or rotating regenerates the cells from vector paths
+    rather than enlarging an old bitmap. Very small text may lose fine details;
+    increase font size or grid resolution to preserve more of the lettering.
+    The font-size value is the base em size; corner scaling is an additional
+    transform and does not rewrite that value.
+  - Select its layer to edit the text again. Drag the box to move, its corners
+    to scale, or just outside a corner to rotate; arrow keys and snapping work
+    as for painted layers. Moves/scales/rotations are pending placements until
+    Enter, click-away, or switching tools commits them; Escape cancels them.
+    Text changes update live and are undoable. Canvas resize, extension, mirror,
+    rotation, crop, and alignment also preserve/rebase the vector text.
+    Text outside the canvas remains editable but is not exported.
+  - Text participates in folders, multiselection outlines, duplication,
+    visibility, opacity, blending, compositing, previews, yarn suggestions,
+    project saving, JSON backups and image exports. Saves include the used SVG
+    outlines so saved text renders without re-fetching its font; changing its
+    content/font requires the relevant catalog font to remain available.
+    These are text-backed raster-stack entries, not a separate flattened image.
+  - Paint, erase, adjustment brushes and pixel pastes cannot modify editable
+    text. **Rasterize to pixels** explicitly converts it to a normal layer;
+    Undo restores text editability. Copy produces a normal pixel clipboard
+    image; Cut/Delete do not erase editable text (delete the layer instead).
+    Full/color/transparency locks block text edits; position locks block
+    geometric transforms and font/size changes. Hidden text cannot be edited.
+  - A text working box is limited to four million cells and 8192 cells per
+    side, with up to one million characters of glyph-path data per text layer.
+    Generated cells also obey the existing aggregate layer-cell budget.
 - Tool settings appear in a fixed right-hand panel inside the canvas frame,
   above the layer list, rather than below the toolbar. Only one settings panel
   is visible at a time: choosing Grid, Crop, or a drawing/selection tool replaces
@@ -56,12 +103,42 @@ tool options, layers, and a magnifier button for zoom controls.
   exports, source pixels, reference sampling, and yarn comparisons are unchanged.
   The checkerboard remains anchored to the board and stays the same screen size
   as you zoom. Reference-on and sampling/cropping retain their white backing.
-- Gridlines appear only when each cell is at least 10 CSS pixels wide and tall,
+- Gridlines appear only when each cell is at least 6 CSS pixels wide and tall,
   with sufficient bitmap resolution as well. Below that threshold, only the
   pixel colors are drawn, preventing dense antialiased lines from muting colors.
   Gridlines return automatically when zoomed in; unchecking Gridlines still
   disables them at every zoom. Crossing the threshold invalidates the old
   raster immediately, so stale gridlines are not stretched while zoom settles.
+- **Dodge / Burn / Sponge** are square-brush color adjustments on the active
+  pixel layer; they do not alter the reference or require a selected palette color.
+  Dodge lightens and Burn darkens with **0–100 Intensity** and a
+  **Shadows / Midtones / Highlights** tonal range (default Midtones, intensity 50).
+  Shadows/highlights use luminance-weighted falloff; midtones peak at middle
+  luminance. These are predictable RGB adjustments, not an exact Photoshop
+  exposure simulation. Sponge offers **Saturate / Desaturate** plus 0–100
+  intensity, adjusting HSL saturation while preserving hue/lightness; neutral
+  gray stays neutral when saturating. Each tool has its own brush size (1–20 cells)
+  and remembers its settings during the current visit.
+  Only existing painted cells inside the canvas are affected. Transparency and
+  position locks permit recoloring; painted-color/full locks block it. Hidden
+  layers/folders cannot be edited. A pixel is affected once per pointer stroke,
+  even where brush stamps overlap; release and brush again to build the effect.
+  Keyboard Space/Enter applies one stamp. Each changed stroke is one undo step;
+  adjusted colors persist in saves/backups and participate in exports and yarn
+  recommendations without automatically expanding the manually managed palette.
+- Paint, Eraser, Dodge, Burn and Sponge show a grid-aligned hover outline of
+  their exact brush footprint. A size-4 brush previews a 4 x 4 square, with
+  even sizes biased right/down exactly as painting is. Eraser also supports
+  brush sizes from 1 to 20 cells. The white/dark outline stays readable over different colors,
+  follows zoom and scrolling, and clips to the canvas at its edges.
+  It hides outside the canvas, during pan/crop/placement, and on touch release.
+  This display-only overlay never changes pixels, saves, undo history or exports.
+- Press **]** to increase brush size by one cell or **[** to decrease it
+  (1–20 cells). This updates the active brush/line/shape outline width and its
+  controls immediately, including any hover preview. The shortcuts also work
+  with Tool options collapsed or its heading focused; reopening shows the
+  updated size. Text inputs, menus,
+  dialogs, cropping and modifier-key combinations are left alone.
 - Layers are listed top-first, with an isolated thumbnail, inline editable name,
   visibility toggle, and selected-row border. The visibility eye is an unfilled
   outline: beige when visible, light gray when hidden, with no button background.
@@ -73,8 +150,12 @@ tool options, layers, and a magnifier button for zoom controls.
   exports, project previews, and yarn recommendations use the visible composite.
   - Select a layer by its thumbnail, row, or name. Its painted bounding box
     becomes a canvas selection; an empty layer selects the entire grid.
-    Drag its border/handles or use arrow keys to move, resize, or rotate its
-    pixels. Numeric dimensions and rotation work as with pasted content.
+    Drag its border to move, its small corner markers to resize, or the area
+    just outside any corner to rotate around the center. A curved-arrow cursor
+    indicates the invisible rotation zones; the separate rotation knob and
+    on-canvas dimension label are omitted. Rotation zones can also be focused
+    with Tab and adjusted with arrow keys. Numeric dimensions and rotation
+    remain available in Tool options, as with pasted content.
     Enter/Apply commits and Escape cancels. Layer pixels outside the board are
     preserved, but hidden in the editor and omitted from the canvas export.
     Choose a drawing tool to finish this selection and resume painting.
@@ -82,6 +163,10 @@ tool options, layers, and a magnifier button for zoom controls.
   - Hold **Ctrl** (or **Cmd** on Mac) while clicking a row, name, grip, or
     thumbnail to add/remove it from the selection. At least one item remains
     selected. A normal row/thumbnail click selects only that item.
+    Each included pixel layer has its own overlapping canvas outline, including
+    nested contents of selected folders, even when folders are collapsed.
+    Transform handles remain on the active pixel layer only; other outlines
+    are display-only and do not intercept pointer input.
     All selected rows are highlighted; the active row has an additional inset
     border. The last added item is active, and painting and canvas transforms
     continue to affect only that active pixel layer.
@@ -288,14 +373,18 @@ tool options, layers, and a magnifier button for zoom controls.
   resizing, cropping, and project switching finalize pending placements first.
   Autosave stores finalized paint, not editable previews; leaving with a
   preview still open triggers the unsaved-work warning.
-- Enlarge the display from 100% (fit) to 800% using the +/- buttons
+- Scale the display from 35% to 800% of fit-to-frame (100%) using the +/- buttons
   overlaid at the bottom-right inside the canvas window, above its scrollbars,
   with Ctrl/Cmd + `+`/`=` and Ctrl/Cmd + `-`, or with Ctrl/Cmd + mouse wheel or a
   trackpad pinch over the canvas (zooms toward the pointer). These replace browser
   page zoom while a project is open.
-  Scroll horizontally/vertically to reach enlarged cells; zoom out to the minimum
-  to fit the view. Zoom preserves the view center and does not alter the grid, saved
-  painting, undo history, or export dimensions. Opening a project resets zoom.
+  Scroll horizontally/vertically with extra space beyond every canvas edge:
+  the outermost row or column can reach the center of the viewport, including
+  while zoomed in. Zooming out to 35% makes the canvas smaller than its frame.
+  Zoom preserves the view center and does not alter the grid, saved
+  painting, undo history, or export dimensions. Opening a project resets to
+  centered 100% fit. Crop mode temporarily uses a fitted view without extra margins;
+  cancelling restores the previous zoom and scroll position.
 - Select Move to drag the zoomed canvas within its frame using touch, a stylus,
   or a mouse, without painting. Arrow keys pan too (Shift moves farther).
   Move only changes the view, not the pattern or undo history. Choose Paint to

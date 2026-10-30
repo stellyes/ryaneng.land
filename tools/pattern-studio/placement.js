@@ -1,5 +1,6 @@
-import { boxFromCells, copyCells, objectCorners, rasterObject, rasterLayerObject, resizeObject, rotatePoint, snapTranslation } from './objects.js';
-import { activeLayer, layerBounds, layerVisible } from './layers.js';
+import { boxFromCells, copyCells, objectCorners, rasterObject, rasterLayerObject, resizeObject, snapTranslation } from './objects.js';
+import { activeLayer, layerBounds, layerVisible, selectedPixels } from './layers.js';
+import { placedText, rasterText } from './text.js';
 
 export function createPlacementEditor({ canvas, getProject, getColor, getStroke, getSnapping = () => false, canTransform = () => true, commitLayerPixels, commitPixels, redraw, updateControls, notify }) {
     const $ = id => document.getElementById(id);
@@ -9,12 +10,18 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     let clipboard = null;
     let pixels = null;
     let guides = [];
+    let outlinedLayers = [];
+    const selectionGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    selectionGroup.classList.add('selected-layer-outlines');
+    selectionGroup.setAttribute('aria-hidden', 'true');
+    $('object-outline').append(selectionGroup);
     const guideGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     guideGroup.classList.add('snap-guides');
     guideGroup.setAttribute('aria-hidden', 'true');
     $('object-outline').append(guideGroup);
 
     function refresh() {
+        if (object && !object.layer) outlinedLayers = [];
         if (object?.kind === 'selection' && !object.layer) {
             const project = getProject();
             object.width = Math.max(1, Math.min(project.cols, object.width));
@@ -50,6 +57,11 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     function preview() {
         if (!object) return new Map();
         const project = getProject();
+        if (!pixels && object.text && object.transformed) {
+            pixels = new Map(rasterText(placedText(object.text, object.originalBounds, object))
+                .filter(([x, y]) => x >= 0 && y >= 0 && x < project.cols && y < project.rows)
+                .map(([x, y, color]) => [y * project.cols + x, color]));
+        }
         if (!pixels) pixels = object.layer
             ? object.transformed ? rasterObject({ ...object, kind: 'paste' }, project.cols, project.rows, getColor()) : new Map()
             : rasterObject(object, project.cols, project.rows, getColor());
@@ -57,15 +69,19 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function commit() {
-        if (!object) return;
+        if (!object) { outlinedLayers = []; render(); return; }
         releaseDrag();
         const pending = preview();
         const layer = object.layer, transformed = object.transformed;
         if (layer && transformed && commitLayerPixels) {
-            try { commitLayerPixels(rasterLayerObject(object)); }
+            try {
+                const text = object.text && placedText(object.text, object.originalBounds, object);
+                commitLayerPixels(text ? rasterText(text) : rasterLayerObject(object), false, text);
+            }
             catch (error) { notify(error.message, true); return false; }
         }
         object = null;
+        outlinedLayers = [];
         if (!layer || (transformed && !commitLayerPixels)) commitPixels(pending, Boolean(layer));
         refresh();
     }
@@ -73,6 +89,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     function cancel(silent = false) {
         releaseDrag();
         object = null;
+        outlinedLayers = [];
         refresh();
         if (!silent) notify('Selection or placement cancelled. The pattern is unchanged.');
     }
@@ -92,7 +109,30 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         }
         object = { ...box, kind: 'selection', layer: true, transformed: false,
             source };
+        if (activeLayer(project).text) {
+            object.text = activeLayer(project).text;
+            object.originalBounds = { ...bounds };
+        }
+        outlineSelectedLayers(activeLayer(project).id);
         refresh();
+    }
+
+    function outlineSelectedLayers(excludeId) {
+        const project = getProject();
+        outlinedLayers = selectedPixels(project).filter(layer => layer.id !== excludeId).map(layer => {
+            const bounds = layerBounds(project, layer);
+            return { id: layer.id, ...bounds };
+        });
+    }
+
+    function selectLayers() {
+        const project = getProject(), layer = activeLayer(project);
+        if (layer?.type === 'layer') selectLayer(layerBounds(project, layer));
+        else {
+            cancel(true);
+            outlineSelectedLayers();
+            refresh();
+        }
     }
 
     function allowLayerTransform() {
@@ -212,10 +252,22 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
 
     function render() {
         guideGroup.replaceChildren();
-        overlay.hidden = !object;
-        if (!object) return;
-        const project = getProject(), isLine = object.kind === 'line';
+        selectionGroup.replaceChildren();
+        overlay.hidden = !object && !outlinedLayers.length;
+        for (const button of overlay.querySelectorAll('button')) button.hidden = true;
+        const isLine = object?.kind === 'line';
+        $('line-hit').style.display = object && isLine ? '' : 'none';
+        $('box-hit').style.display = object && !isLine ? '' : 'none';
+        if (overlay.hidden) return;
+        const project = getProject();
         $('object-outline').setAttribute('viewBox', `0 0 ${project.cols} ${project.rows}`);
+        for (const bounds of outlinedLayers) {
+            const outline = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            outline.dataset.layerId = bounds.id;
+            for (const key of ['x', 'y', 'width', 'height']) outline.setAttribute(key, bounds[key]);
+            selectionGroup.append(outline);
+        }
+        if (!object) return;
         const corners = object.kind === 'line' ? [] : objectCorners(object);
         for (const guide of guides) {
             const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -234,10 +286,9 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         $('line-hit').style.display = isLine ? '' : 'none';
         $('box-hit').style.display = isLine ? 'none' : '';
         $('object-help').textContent = object.kind === 'selection'
-            ? object.layer ? 'Selected layer: drag the border or handles to transform its pixels. Copy, Cut and Delete act on this layer. Enter applies; Escape cancels the transform.'
+            ? object.layer ? 'Selected layer: drag the border to move, a corner to resize, or just outside a corner to rotate. Transforms, Copy, Cut and Delete act on the active layer. Enter applies; Escape cancels the transform.'
                 : 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
-            : 'Drag handles to adjust; drag inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape or Delete cancels. Content outside the grid is clipped.';
-        for (const button of overlay.querySelectorAll('button')) button.hidden = true;
+            : 'Drag corners to resize, just outside a corner to rotate, or inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape or Delete cancels. Content outside the grid is clipped.';
         if (isLine) {
             const a = { x: object.a.x + 0.5, y: object.a.y + 0.5 }, b = { x: object.b.x + 0.5, y: object.b.y + 0.5 };
             for (const [key, point] of [['a', a], ['b', b]]) {
@@ -247,8 +298,6 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             }
             const hit = $('line-hit');
             for (const [key, value] of Object.entries({ x1: a.x, y1: a.y, x2: b.x, y2: b.y })) hit.setAttribute(key, value);
-            $('object-dimensions').textContent = `${Math.abs(object.a.x - object.b.x) + 1} x ${Math.abs(object.a.y - object.b.y) + 1} cells`;
-            position($('object-dimensions'), a);
         } else {
             const corners = objectCorners(object);
             $('box-hit').setAttribute('points', corners.map(p => `${p.x},${p.y}`).join(' '));
@@ -257,13 +306,14 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
                 button.hidden = false;
                 position(button, corners[index]);
             }
-            $('object-dimensions').textContent = `${object.width} x ${object.height} cells`;
-            position($('object-dimensions'), corners[0]);
             if (object.kind !== 'selection' || object.layer) {
-                const button = overlay.querySelector('[data-edit="rotate"]');
-                const offset = rotatePoint(0, -object.height / 2 - 28 * project.rows / canvas.getBoundingClientRect().height, object.angle);
-                button.hidden = false;
-                position(button, { x: object.cx + offset.x, y: object.cy + offset.y });
+                for (const [index, corner] of ['nw', 'ne', 'se', 'sw'].entries()) {
+                    const button = overlay.querySelector(`[data-rotate="${corner}"]`);
+                    button.hidden = false;
+                    position(button, corners[index]);
+                    const [sx, sy] = [[-1, -1], [1, -1], [1, 1], [-1, 1]][index];
+                    button.style.transform = `translate(-50%, -50%) rotate(${object.angle}deg) translate(${sx * 16}px, ${sy * 16}px)`;
+                }
                 for (const key of ['width', 'height', 'angle']) {
                     const input = $(`object-${key}`);
                     if (document.activeElement !== input) input.value = object[key];
@@ -273,6 +323,10 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function clearSelection() {
+        if (object?.text) {
+            notify('Edit the text in Tool options, or delete its layer. Text layers cannot be erased or cut as pixels.', true);
+            return false;
+        }
         releaseDrag();
         if (object.layer && object.transformed) {
             commit();
@@ -284,6 +338,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             try { changed = commitLayerPixels([], true); }
             catch (error) { notify(error.message, true); return false; }
             object = null;
+            outlinedLayers = [];
             refresh();
             return changed;
         }
@@ -293,12 +348,17 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             cleared.set((y + row) * project.cols + x + col, null);
         }
         object = null;
+        outlinedLayers = [];
         const changed = commitPixels(cleared);
         refresh();
         return changed;
     }
 
     function copy(cut = false) {
+        if (cut && object?.text) {
+            notify('Text layers cannot be cut as pixels. Use Copy, edit their text, or delete the layer.', true);
+            return;
+        }
         if (object?.kind !== 'selection') {
             notify(`Choose Select and drag over a section of the grid before ${cut ? 'cutting' : 'copying'}.`, true);
             return;
@@ -335,9 +395,21 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function keydown(event) {
-        if (!object || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
+        if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return false;
+        if (!object) {
+            if (outlinedLayers.length && event.key === 'Escape') {
+                event.preventDefault();
+                cancel();
+                return true;
+            }
+            return false;
+        }
         if (event.key === 'Delete' && object.kind === 'selection') {
             event.preventDefault();
+            if (object.text) {
+                notify('Edit the text in Tool options, or delete its layer. Text layers cannot be erased as pixels.', true);
+                return true;
+            }
             const changed = clearSelection();
             canvas.focus({ preventScroll: true });
             notify(changed ? 'Selected pixels deleted to transparency. Undo restores them. The clipboard is unchanged.'
@@ -424,7 +496,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     $('placement-cancel').addEventListener('click', () => cancel());
 
     return {
-        begin, commit, cancel, selectLayer, copy, cut: () => copy(true), paste, keydown, startKeyboard, refresh, render, preview, setStroke,
+        begin, commit, cancel, selectLayer, selectLayers, copy, cut: () => copy(true), paste, keydown, startKeyboard, refresh, render, preview, setStroke,
         refreshSnapping() {
             if (drag?.lastEvent) move(drag.lastEvent);
             else { guides = []; render(); }

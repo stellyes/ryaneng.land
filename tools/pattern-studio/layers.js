@@ -1,4 +1,5 @@
 import { BLEND_MODES, blendPixel, pixelColor, pixelWord, layerSeed, dissolveNoise } from './blending.js';
+import { validateText, textBounds, rasterText, transformText } from './text.js';
 export { BLEND_MODES } from './blending.js';
 export const LOCKS = ['transparency', 'color', 'position', 'all'];
 export const MAX_LAYERS = 64;
@@ -27,6 +28,10 @@ export function checkLayerMemory(project, layers = project.layers) {
 }
 
 export function translateLayer(project, layer, dx, dy) {
+    if (layer.text) {
+        const text = transformText(layer.text, [1, 0, 0, 1, dx, dy]);
+        return { ...layerRaster(project, rasterText(text)), text };
+    }
     return layerRaster(project, [...layerPixels(project, layer)].map(([x, y, color]) => [x + dx, y + dy, color]));
 }
 
@@ -118,7 +123,10 @@ export function editLayerSelection(project, action, drop = {}) {
                 const copy = { ...layer, id: replacements.get(layer.id),
                     parentId: replacements.get(layer.parentId) || layer.parentId,
                     name: layer.id === root.id ? layer.name.slice(0, 75) + ' copy' : layer.name };
-                if (layer.type === 'layer') { copy.cells = layer.cells.slice(); copy.offCanvas = structuredClone(layer.offCanvas || []); copy.locks = { ...layer.locks }; }
+                if (layer.type === 'layer') {
+                    copy.cells = layer.cells.slice(); copy.offCanvas = structuredClone(layer.offCanvas || []); copy.locks = { ...layer.locks };
+                    if (layer.text) copy.text = structuredClone(layer.text);
+                }
                 work.layers.push(copy);
                 return copy;
             });
@@ -279,7 +287,8 @@ export function layerDropAction(project, id, action) {
     const suffix = action === 'copy' ? ' copy' : ' folder';
     const name = source.name.slice(0, 80 - suffix.length) + suffix;
     const entry = action === 'copy'
-        ? { ...source, id: crypto.randomUUID(), name, cells: source.cells.slice(), offCanvas: structuredClone(source.offCanvas || []), locks: { ...source.locks } }
+        ? { ...source, id: crypto.randomUUID(), name, cells: source.cells.slice(), offCanvas: structuredClone(source.offCanvas || []), locks: { ...source.locks },
+            ...(source.text ? { text: structuredClone(source.text) } : {}) }
         : { id: crypto.randomUUID(), type: 'folder', name, parentId: source.parentId, visible: true, expanded: true };
     ordered.splice(index, 0, entry);
     if (action === 'folder') source.parentId = entry.id;
@@ -384,7 +393,7 @@ export function serializeLayers(project) {
 }
 
 export function canWrite(layer, oldColor) {
-    if (!layer || layer.type !== 'layer' || layer.locks.all) return false;
+    if (!layer || layer.type !== 'layer' || layer.text || layer.locks.all) return false;
     if (layer.locks.transparency && oldColor === null) return false;
     if (layer.locks.color && oldColor !== null) return false;
     return true;
@@ -401,6 +410,7 @@ export function canTransform(layer) {
 }
 
 export function layerBounds(project, layer) {
+    if (layer.text) return textBounds(layer.text);
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
     for (const [x, y] of layerPixels(project, layer)) {
         left = Math.min(left, x); top = Math.min(top, y);
@@ -410,12 +420,18 @@ export function layerBounds(project, layer) {
     return { x: left, y: top, width: right - left + 1, height: bottom - top + 1 };
 }
 
-export function transformLayers(project, transform, cols, rows, mapPoint = (x, y) => [x, y]) {
+export function transformLayers(project, transform, cols, rows, mapPoint = (x, y) => [x, y], textMatrix) {
     if (project.layers.filter(layer => layer.type === 'layer').length * cols * rows > MAX_LAYER_CELLS) {
         throw new Error('This grid would exceed the 4 million layer-cell memory limit. Reduce the grid size or remove layers.');
     }
     const layers = project.layers.map(layer => {
         if (layer.type !== 'layer') return layer;
+        if (layer.text) {
+            const origin = mapPoint(0, 0), x = mapPoint(1, 0), y = mapPoint(0, 1);
+            const a = x[0] - origin[0], b = x[1] - origin[1], c = y[0] - origin[0], d = y[1] - origin[1];
+            const text = transformText(layer.text, textMatrix || [a, b, c, d, origin[0] + 0.5 - (a + c) / 2, origin[1] + 0.5 - (b + d) / 2]);
+            return { ...layer, text, ...layerRaster({ cols, rows }, rasterText(text)) };
+        }
         const cells = transform(layer.cells);
         const extra = (layer.offCanvas || []).map(([x, y, color]) => [...mapPoint(x, y), color]);
         const raster = layerRaster({ cols, rows }, extra);
@@ -441,10 +457,12 @@ export function validateLayers(data) {
             !(layer.parentId === null || typeof layer.parentId === 'string')) invalid();
         ids.add(layer.id);
         if (layer.type === 'folder') {
+            if (layer.text !== undefined) invalid();
             if (typeof layer.expanded !== 'boolean') invalid();
             continue;
         }
         count++;
+        if (layer.text !== undefined) validateText(layer.text);
         if (layer.offCanvas !== undefined) {
             if (!Array.isArray(layer.offCanvas) || layer.offCanvas.length > MAX_LAYER_CELLS) invalid();
             const positions = new Set();

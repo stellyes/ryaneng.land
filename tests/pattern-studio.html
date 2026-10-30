@@ -8,17 +8,19 @@
 import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
 import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
-import { boxFromCells, brush, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth, snapTranslation } from '../tools/pattern-studio/objects.js';
+import { boxFromCells, brush, brushBounds, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth, snapTranslation } from '../tools/pattern-studio/objects.js';
 import { approximateGrid, approximationDimensions } from '../tools/pattern-studio/approximation.js';
 import { createPlacementEditor } from '../tools/pattern-studio/placement.js';
 import { blendRgb, blendPixel, pixelColor, pixelWord, layerSeed, dissolveNoise } from '../tools/pattern-studio/blending.js';
-import { showGrid, createTransparencyPattern, GRID_MIN_CELL_SIZE } from '../tools/pattern-studio/display.js';
+import { showGrid, createTransparencyPattern, GRID_MIN_CELL_SIZE, canvasLayout, stepZoom, MIN_ZOOM, MAX_ZOOM } from '../tools/pattern-studio/display.js';
 import { BLEND_MODES, LOCKS, MAX_LAYERS, MAX_LAYER_CELLS, activeLayer, bindLayer, migrateLayers, newLayer,
     layerOrder, layerVisible, compositeColor, flattenLayers, serializeLayers, canWrite, writeLayerCell,
     canTransform, layerBounds, transformLayers, validateLayers, createLayerCompositor, flattenPixels, moveLayer,
     layerAncestors, layerDropAction, deleteLayer, selectedLayers, selectedPixels, editLayerSelection,
     layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers } from '../tools/pattern-studio/layers.js';
 import { rasterLayerObject } from '../tools/pattern-studio/objects.js';
+import { adjustColor, adjustBrush } from '../tools/pattern-studio/adjustments.js';
+import { fontCatalog, loadSvgFont, parseSvgFont, layoutText, rasterText, transformText, placedText, textBounds, validateText, fontNamePreview } from '../tools/pattern-studio/text.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -32,10 +34,227 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
-    assert(GRID_MIN_CELL_SIZE === 10 && !showGrid(500, 500, 4999, 5000, 10000, 10000) &&
-        showGrid(500, 500, 5000, 5000, 10000, 10000), 'Grid appears only at the exact 10-CSS-pixel cell threshold');
-    assert(!showGrid(500, 500, 6000, 6000, 4999, 6000), 'A stretched low-resolution bitmap cannot show a dense grid');
-    assert(!showGrid(100, 500, 2000, 4000, 2000, 4000), 'Grid visibility checks both cell dimensions');
+    {
+        assert(MIN_ZOOM === 0.35 && MAX_ZOOM === 8, 'Zoom spans exactly 35% through 800% of fit-to-frame');
+        assert(stepZoom(0.5, -1) === 0.35 && stepZoom(0.35, -1) === 0.35 &&
+            stepZoom(0.35, 1) === 0.5 && stepZoom(0.75, 1) === 1 && stepZoom(8, 1) === 8,
+            'Zoom steps reach the minimum and return to exact fit without drifting');
+        const padding = { x: 32, y: 24 };
+        for (const [width, height, cols, rows] of [[500, 300, 500, 300], [100, 500, 20, 100], [1, 1, 1, 1]]) {
+            const project = { width, height, cols, rows };
+            const fit = canvasLayout(project, 900, 600, padding, 1);
+            const small = canvasLayout(project, 900, 600, padding, MIN_ZOOM);
+            assert(Math.abs(small.width - fit.width * MIN_ZOOM) <= 1 &&
+                Math.abs(small.height - fit.height * MIN_ZOOM) <= 1, 'Minimum zoom renders 35% of fitted dimensions');
+            for (const zoom of [MIN_ZOOM, 1, 2, MAX_ZOOM]) {
+                const layout = canvasLayout(project, 900, 600, padding, zoom);
+                const left = (layout.wrapWidth - layout.width) / 2, top = (layout.wrapHeight - layout.height) / 2;
+                const firstX = left + layout.width / cols / 2, lastX = left + layout.width - layout.width / cols / 2;
+                const firstY = top + layout.height / rows / 2, lastY = top + layout.height - layout.height / rows / 2;
+                assert(firstX >= 450 - 1e-8 && lastX - (layout.wrapWidth - 900) <= 450 + 1e-8 &&
+                    firstY >= 300 - 1e-8 && lastY - (layout.wrapHeight - 600) <= 300 + 1e-8,
+                    `All four outermost cell centers can reach the viewport center at zoom ${zoom}`);
+            }
+        }
+        const crop = canvasLayout({ width: 500, height: 300, cols: 500, rows: 300 }, 900, 600, padding, 1, false);
+        assert(crop.wrapWidth === 900 && crop.wrapHeight === 600, 'Crop fit retains its non-overscrolling view');
+        assert(canvasLayout({ width: 1, height: 1, cols: 1, rows: 1 }, 20, 20, padding, 1) === null,
+            'Unavailable viewport space does not produce invalid canvas dimensions');
+    }
+    {
+        const entries = await fontCatalog();
+        assert(entries.length > 0 && entries.every(entry => entry.name && entry.file.endsWith('.svg')),
+            'Text font dropdown catalog exposes the bundled SVG fonts');
+        for (const entry of entries) {
+            const font = await loadSvgFont(entry.file);
+            assert(font.glyphs.size > 100 && font.units > 0, `${entry.name} SVG glyphs and metrics parse`);
+            const preview = fontNamePreview(font, entry);
+            const name = layoutText(font, { content: entry.name, font: entry.file, size: 32, color: '#000000' }).text;
+            const previewBox = preview.getAttribute('viewBox').split(' ').map(Number);
+            assert(preview.localName === 'svg' && previewBox.length === 4 && previewBox.every(Number.isFinite) &&
+                previewBox[2] > 0 && previewBox[3] > 0 &&
+                Math.abs(parseFloat(preview.style.width) / (previewBox[2] / previewBox[3]) - 20) < 1e-6 &&
+                preview.querySelectorAll('path').length === name.paths.length && name.paths.length > 0 &&
+                [...preview.children].every((path, i) => path.getAttribute('d') === name.paths[i].d &&
+                    path.getAttribute('fill') === 'currentColor'),
+                `${entry.name} picker preview uses its actual SVG glyph outlines`);
+            const { text, missing } = layoutText(font, { content: 'Hello é', font: entry.file, size: 24, color: '#123456' });
+            const pixels = rasterText(text);
+            assert(pixels.length > 10 && pixels.every(([, , color]) => color === '#123456') && !missing.length,
+                `${entry.name} renders SVG outlines, including normalized accented characters`);
+        }
+        rejects(() => parseSvgFont('<svg/>'), 'Malformed SVG font fails explicitly');
+        rejects(() => parseSvgFont('<svg><font horiz-adv-x="1"><font-face units-per-em="0" ascent="1"/></font></svg>'),
+            'Invalid SVG metrics fail explicitly');
+        let failed = false;
+        try { await loadSvgFont('../outside.svg'); } catch { failed = true; }
+        assert(failed, 'Only catalogued font files can load');
+        const font = parseSvgFont(`<svg xmlns="http://www.w3.org/2000/svg"><defs><font horiz-adv-x="10">
+            <font-face units-per-em="10" ascent="10"/>
+            <missing-glyph horiz-adv-x="10" d="M0 0H10V10H0Z"/>
+            <glyph unicode=" " horiz-adv-x="5"/>
+            <glyph glyph-name="A" unicode="A" d="M0 0H10V10H0Z"/>
+            <glyph glyph-name="B" unicode="B" d="M0 0H10V10H0Z"/>
+            <glyph unicode="fi" horiz-adv-x="8" d="M0 0H8V10H0Z"/>
+            <hkern g1="A" g2="B" k="2"/>
+            </font></defs></svg>`);
+        const make = (content = 'A', size = 10) => layoutText(font, { content, font: 'Test.svg', size, color: '#ff0000' }).text;
+        const text = make();
+        assert(rasterText(text).length === 100, 'SVG font paths fill exactly the expected grid cells');
+        assert(make('AB').width === 18, 'SVG glyph-name kerning adjusts advance');
+        assert(make('fi').paths.length === 1 && make('fi').width === 8, 'Longest matching multi-character glyph is used');
+        assert(make('A A').width === 25 && make('A A').paths.length === 2, 'Spaces advance without painted cells');
+        assert(make('A\nB').height > text.height && make('A\nB').paths[1].y > text.paths[0].y,
+            'Multiline text advances baselines and expands its box');
+        assert(layoutText(font, { ...text, content: '🙂' }).missing[0] === '🙂', 'Unsupported Unicode reports its fallback glyph');
+        assert(rasterText(make('')).length === 0 && make('').width >= 1, 'Empty text has an editable box without painted pixels');
+        assert(rasterText(make('A', 20)).length === 400, 'Larger font size rerenders from SVG, not a stretched small bitmap');
+        assert(rasterText({ ...text, size: 20, width: 20, height: 24 }).length === 400 && rasterText(text).length === 100,
+            'Cached glyph paths respect changed font scale and restore the original scale');
+        const moved = transformText(text, [1, 0, 0, 1, -3, 5]);
+        assert(textBounds(moved).x === -3 && textBounds(moved).y === 5 && text.matrix[4] === 0,
+            'Vector translation supports off-canvas positions without mutating its source');
+        const placed = placedText(text, { x: 0, y: 0, width: 10, height: 12 },
+            { cx: 20, cy: 20, width: 20, height: 24, angle: 90 });
+        assert(rasterText(placed).length === 400 && placed.paths === text.paths,
+            'Resize/rotation transforms retain SVG paths and regenerate crisp cells');
+        assert(JSON.stringify(textBounds(placed)) === JSON.stringify({ x: 8, y: 10, width: 24, height: 20 }),
+            'Quarter-turn text bounds do not acquire extra cells from floating-point rounding');
+        assert(rasterText(transformText(text, [1e-9, 0, 0, 1, 0, 0])).length === 0,
+            'Valid subpixel text transforms safely render an empty raster');
+        const p = migrateLayers({ cols: 40, rows: 40, cells: Array(1600).fill(null) });
+        const layer = activeLayer(p);
+        Object.assign(layer, { text: moved }, layerRaster(p, rasterText(moved)));
+        assert(layer.offCanvas.length === 30 && layer.cells.filter(Boolean).length === 70,
+            'Text raster splits visible and off-canvas cells without losing glyph pixels');
+        assert(flattenLayers(p).filter(Boolean).length === 70, 'Text participates in fixed-canvas compositing');
+        assert(layerBounds(p, layer).x === -3 && layerBounds(p, layer).height === 12,
+            'Text selection uses the full editable text box');
+        assert(!canWrite(layer, '#ff0000') && !writeLayerCell(layer, 0, '#000000'),
+            'Editable text cannot be accidentally painted over as raster pixels');
+        const translated = translateLayer(p, layer, 3, 0);
+        assert(translated.text.matrix[4] === 0 && !translated.offCanvas.length &&
+            translated.cells.filter(Boolean).length === 100, 'Layer move preserves vector text and reveals hidden glyph pixels');
+        const cloned = structuredClone(serializeLayers(p));
+        validateLayers(cloned);
+        assert(cloned.layers[0].text.content === 'A' && cloned.layers[0].text.paths[0].d === text.paths[0].d,
+            'Text metadata and SVG outlines survive JSON-compatible serialization');
+        editLayerSelection(p, 'copy');
+        const copy = activeLayer(p);
+        assert(copy.text !== layer.text && copy.text.paths !== layer.text.paths &&
+            copy.text.matrix !== layer.text.matrix, 'Text layer duplication deeply copies editable metadata');
+        const target = newLayer(40, 40, 'Anchor');
+        target.cells[20 * 40 + 20] = '#000000';
+        p.layers.push(target);
+        p.selectedLayerIds = [copy.id, target.id];
+        alignLayers(p, 'left');
+        assert(activeLayer(p).text.matrix[4] === 20, 'Alignment moves text vectors, not only their pixel cache');
+        const transformProject = migrateLayers({ cols: 40, rows: 40, cells: Array(1600).fill(null) });
+        const original = activeLayer(transformProject);
+        Object.assign(original, { text }, layerRaster(transformProject, rasterText(text)));
+        transformLayers(transformProject, cells => extendCells(cells, 40, 40, { left: 2 }).cells, 42, 40,
+            (x, y) => [x + 2, y]);
+        assert(activeLayer(transformProject).text.matrix[4] === 2 &&
+            activeLayer(transformProject).cells[2] === '#ff0000', 'Adding columns rebases editable SVG text');
+        transformLayers(transformProject, cells => resizeCells(cells, 42, 40, 21, 20), 21, 20,
+            (x, y) => [Math.floor(x / 2), Math.floor(y / 2)], [0.5, 0, 0, 0.5, 0, 0]);
+        assert(rasterText(activeLayer(transformProject).text).length === 25, 'Grid resize resamples text from vector geometry');
+        for (const change of [
+            data => { data.size = 0; }, data => { data.content = 'A'.repeat(1001); },
+            data => { data.color = 'red'; }, data => { data.matrix = [0, 0, 0, 0, 0, 0]; },
+            data => { data.paths[0].d = '<script/>'; }, data => { data.font = '../Test.svg'; },
+            data => { data.width = 100000; },
+        ]) {
+            const invalid = structuredClone(text); change(invalid);
+            rejects(() => validateText(invalid), 'Invalid text metadata is rejected');
+        }
+        rejects(() => rasterText(transformText(text, [10000, 0, 0, 10000, 0, 0])),
+            'Oversized vector text fails before allocating a large working bitmap');
+    }
+    for (const size of [1, 2, 3, 4, 20]) {
+        const bounds = brushBounds(5, 6, size), cells = [];
+        brush(5, 6, size, (x, y) => cells.push({ x, y }));
+        assert(cells.length === bounds.width * bounds.height &&
+            Math.min(...cells.map(p => p.x)) === bounds.x && Math.min(...cells.map(p => p.y)) === bounds.y &&
+            Math.max(...cells.map(p => p.x)) === bounds.x + bounds.width - 1 &&
+            Math.max(...cells.map(p => p.y)) === bounds.y + bounds.height - 1,
+            `Size ${size} preview bounds exactly match applied brush cells`);
+    }
+    assert(JSON.stringify(brushBounds(5, 5, 4)) === JSON.stringify({ x: 4, y: 4, width: 4, height: 4 }),
+        'Even brush preview matches right/down painting bias');
+    {
+        const adjust = (color, tool, intensity = 50, extra = {}) => adjustColor(color, { tool, intensity, ...extra });
+        for (const tool of ['dodge', 'burn', 'sponge']) {
+            assert(adjust(null, tool) === null, `${tool} preserves transparent pixels`);
+            assert(adjust('#804040', tool, 0) === '#804040', `${tool} intensity zero is an exact no-op`);
+            rejects(() => adjust('#804040', tool, -1), `${tool} rejects negative intensity`);
+            rejects(() => adjust('#804040', tool, 101), `${tool} rejects excess intensity`);
+            rejects(() => adjust('#804040', tool, 0.5), `${tool} rejects fractional intensity`);
+        }
+        assert(adjust('#808080', 'dodge') === '#bfbfbf', 'Dodge lightens midtones with weighted intensity');
+        assert(adjust('#808080', 'burn') === '#404040', 'Burn darkens midtones with weighted intensity');
+        assert(adjust('#000000', 'dodge', 100, { range: 'shadows' }) === '#ffffff',
+            'Full-intensity shadow Dodge can lift black');
+        assert(adjust('#ffffff', 'burn', 100, { range: 'highlights' }) === '#000000',
+            'Full-intensity highlight Burn can darken white');
+        assert(adjust('#000000', 'burn', 100) === '#000000' && adjust('#ffffff', 'dodge', 100) === '#ffffff',
+            'Dodge/Burn endpoints remain valid without wrapping');
+        for (const tool of ['dodge', 'burn']) {
+            const value = (color, range, intensity = 50) => parseInt(adjust(color, tool, intensity, { range }).slice(1, 3), 16);
+            assert(Math.abs(value('#202020', 'shadows') - 32) > Math.abs(value('#202020', 'highlights') - 32),
+                `${tool} Shadows targets dark colors more strongly`);
+            assert(Math.abs(value('#e0e0e0', 'highlights') - 224) > Math.abs(value('#e0e0e0', 'shadows') - 224),
+                `${tool} Highlights targets light colors more strongly`);
+            assert(Math.abs(value('#808080', 'midtones') - 128) > Math.abs(value('#808080', 'shadows') - 128),
+                `${tool} Midtones favors middle luminance`);
+            assert(Math.abs(value('#808080', 'midtones', 80) - 128) > Math.abs(value('#808080', 'midtones', 20) - 128),
+                `${tool} intensity controls effect strength`);
+        }
+        assert(adjust('#804040', 'sponge', 100, { mode: 'desaturate' }) === '#606060',
+            'Sponge Desaturate removes saturation while preserving HSL lightness');
+        assert(adjust('#804040', 'sponge', 100) === '#c00000', 'Sponge Saturate increases saturation without changing hue/lightness');
+        assert(adjust('#804040', 'sponge', 50) === '#a02020', 'Sponge strength interpolates saturation');
+        assert(adjust('#808080', 'sponge', 100) === '#808080' && adjust('#ff0000', 'sponge', 100) === '#ff0000',
+            'Saturating neutral or fully saturated pixels does not invent a hue or alter endpoints');
+        rejects(() => adjust('#808080', 'unknown'), 'Unknown adjustment tool is rejected');
+        rejects(() => adjust('#808080', 'dodge', 50, { range: 'unknown' }), 'Unknown tonal range is rejected');
+        rejects(() => adjust('#808080', 'sponge', 50, { mode: 'unknown' }), 'Unknown sponge mode is rejected');
+        const p = migrateLayers({ cols: 4, rows: 3, cells: Array(12).fill('#808080') });
+        const layer = activeLayer(p), other = newLayer(4, 3, 'Untouched');
+        other.cells.fill('#804040'); p.layers.push(other);
+        layer.cells[0] = null;
+        layer.offCanvas = [[-1, 0, '#808080']];
+        const options = { tool: 'dodge', intensity: 50 }, visited = new Set();
+        const first = adjustBrush(p, layer, 0, 0, 3, options, visited);
+        assert(first.changed && !first.blocked && layer.cells[0] === null && layer.cells[1] === '#bfbfbf' &&
+            layer.cells[5] === '#bfbfbf' && layer.cells[2] === '#808080',
+            'Adjustment brush clips its square footprint and leaves transparent cells empty');
+        assert(!adjustBrush(p, layer, 0, 0, 3, options, visited).changed && layer.cells[1] === '#bfbfbf',
+            'A stroke adjusts each pixel once regardless of duplicate pointer events');
+        adjustBrush(p, layer, 1, 0, 3, options, visited);
+        assert(layer.cells[1] === '#bfbfbf' && layer.cells[2] === '#bfbfbf',
+            'Overlapping brush stamps do not multiply intensity');
+        assert(adjustBrush(p, layer, 1, 0, 1, options).changed && layer.cells[1] !== '#bfbfbf',
+            'A new stroke builds on the previous adjustment');
+        assert(other.cells.every(color => color === '#804040') && layer.offCanvas[0][2] === '#808080',
+            'Adjustments leave other layers and hidden off-canvas pixels unchanged');
+        layer.locks.transparency = true;
+        assert(adjustBrush(p, layer, 2, 1, 1, options).changed && layer.cells[0] === null,
+            'Transparency lock allows adjustment of existing pixels');
+        for (const lock of ['all', 'color']) {
+            layer.locks[lock] = true;
+            const before = [...layer.cells], result = adjustBrush(p, layer, 2, 1, 1, options);
+            assert(!result.changed && result.blocked && JSON.stringify(layer.cells) === JSON.stringify(before),
+                `${lock} lock blocks adjustment without changing pixels`);
+            layer.locks[lock] = false;
+        }
+        layer.locks.position = true;
+        assert(adjustBrush(p, layer, 2, 1, 1, options).changed, 'Position lock does not prevent color adjustment');
+    }
+    assert(GRID_MIN_CELL_SIZE === 6 && !showGrid(500, 500, 2999, 3000, 10000, 10000) &&
+        showGrid(500, 500, 3000, 3000, 10000, 10000), 'Grid appears only at the exact 6-CSS-pixel cell threshold');
+    assert(!showGrid(500, 500, 6000, 6000, 2999, 6000), 'A stretched low-resolution bitmap cannot show a dense grid');
+    assert(!showGrid(100, 500, 2000, 2999, 2000, 4000), 'Grid visibility checks both cell dimensions');
     const checkerCanvas = document.createElement('canvas');
     checkerCanvas.width = checkerCanvas.height = 32;
     const checkerContext = checkerCanvas.getContext('2d');
@@ -859,7 +1078,8 @@ try {
           <button data-edit="a"></button><button data-edit="b"></button>
           <button data-edit="resize" data-resize="nw"></button><button data-edit="resize" data-resize="ne"></button>
           <button data-edit="resize" data-resize="se"></button><button data-edit="resize" data-resize="sw"></button>
-          <button data-edit="rotate"></button><span id="object-dimensions"></span></div>
+          <button data-edit="rotate" data-rotate="nw"></button><button data-edit="rotate" data-rotate="ne"></button>
+          <button data-edit="rotate" data-rotate="se"></button><button data-edit="rotate" data-rotate="sw"></button></div>
         <p id="object-help"></p><input id="object-width"><input id="object-height"><input id="object-angle">
         <select id="shape-type"><option>rectangle</option></select><select id="shape-fill"><option>filled</option></select>
         <button id="placement-apply"></button><button id="placement-cancel"></button>`;
@@ -960,6 +1180,79 @@ try {
             'Pointer release retains snapped position and clears temporary guides');
         editor.cancel(true);
         assert(placementLayer.cells[1010] === '#ff0000', 'Cancelling a snapped drag preserves original layer pixels');
+        for (const [corner, x, y] of [['nw', 8, 8], ['ne', 16, 8], ['se', 16, 16], ['sw', 8, 16]]) {
+            selectPixels();
+            const zone = overlay.querySelector(`[data-rotate="${corner}"]`);
+            assert(!zone.hidden, `Outside ${corner} rotation zone is available for a layer selection`);
+            zone.dispatchEvent(pointer('pointerdown', x, y));
+            const dx = x - 12, dy = y - 12;
+            overlay.dispatchEvent(pointer('pointermove', 12 - dy, 12 + dx));
+            overlay.dispatchEvent(pointer('pointerup', 12 - dy, 12 + dx));
+            assert(document.getElementById('object-angle').value === '90' && width.value === '4' &&
+                editor.transformingLayer, `${corner} outside drag rotates without resizing`);
+            editor.cancel(true);
+        }
+        selectPixels();
+        editor.keydown({ key: 'ArrowRight', target: overlay.querySelector('[data-rotate="ne"]'), preventDefault() {} });
+        assert(document.getElementById('object-angle').value === '1' && width.value === '4',
+            'Focused outside-corner controls retain keyboard rotation');
+        editor.cancel(true);
+        editor.startKeyboard('select', { x: 10, y: 10 });
+        assert([...overlay.querySelectorAll('[data-rotate]')].every(button => button.hidden),
+            'Copy-only area selections do not expose unsupported rotation controls');
+        editor.cancel(true);
+        selectPixels();
+        overlay.querySelector('[data-resize="se"]').dispatchEvent(pointer('pointerdown', 14, 14));
+        overlay.dispatchEvent(pointer('pointermove', 16, 17));
+        overlay.dispatchEvent(pointer('pointerup', 16, 17));
+        assert(width.value === '6' && document.getElementById('object-height').value === '7' &&
+            document.getElementById('object-angle').value === '0', 'Direct corner drag resizes rather than rotating');
+        editor.cancel(true);
+        placementLayer.locks.position = true;
+        selectPixels();
+        overlay.querySelector('[data-rotate="nw"]').dispatchEvent(pointer('pointerdown', 8, 8));
+        overlay.dispatchEvent(pointer('pointermove', 16, 8));
+        assert(!editor.dragging && !editor.transformingLayer && lastNotice.includes('position-locked'),
+            'Outside-corner rotation respects position locks');
+        placementLayer.locks.position = false;
+        editor.cancel(true);
+        const second = newLayer(100, 60, 'Second');
+        second.cells[1212] = '#000000'; second.cells[2020] = '#000000';
+        const outside = newLayer(100, 60, 'Outside');
+        outside.offCanvas = [[-3, -2, '#ffffff']];
+        const folder = { id: 'selection-folder', type: 'folder', name: 'Selection folder', parentId: null, visible: true, collapsed: true };
+        const nested = { ...folder, id: 'selection-nested', parentId: folder.id };
+        second.parentId = folder.id; outside.parentId = nested.id;
+        placementProject.layers.push(folder, second, nested, outside);
+        placementProject.selectedLayerIds = [placementLayer.id, folder.id, second.id];
+        bindLayer(placementProject);
+        editor.selectLayers();
+        const outlines = () => [...overlay.querySelectorAll('.selected-layer-outlines rect')];
+        assert(outlines().length === 2 && outlines().some(e => e.dataset.layerId === second.id) &&
+            outlines().some(e => e.getAttribute('x') === '-3' && e.getAttribute('y') === '-2'),
+            'Multiple selections outline nested folder contents once, including off-canvas bounds');
+        key('ArrowRight');
+        assert(hit.getAttribute('points').startsWith('11,10') && outlines().find(e => e.dataset.layerId === second.id).getAttribute('x') === '12' &&
+            second.cells[1212] === '#000000', 'Active-layer transforms leave other selected layers and their outlines stationary');
+        editor.cancel(true);
+        assert(overlay.hidden && !outlines().length, 'Cancel removes all selected-layer outlines');
+        placementProject.activeLayerId = folder.id;
+        placementProject.selectedLayerIds = [folder.id];
+        bindLayer(placementProject);
+        editor.selectLayers();
+        assert(!overlay.hidden && !editor.active && outlines().length === 2 &&
+            [...overlay.querySelectorAll('button')].every(button => button.hidden) && hit.style.display === 'none',
+            'A selected folder outlines every descendant without exposing active-layer transform handles');
+        editor.commit();
+        assert(overlay.hidden && !outlines().length, 'Finalizing a folder selection clears its outlines');
+        editor.selectLayers();
+        key('Escape');
+        assert(overlay.hidden && !outlines().length, 'Escape clears a folder-only selection outline');
+        placementProject.activeLayerId = placementLayer.id;
+        placementProject.selectedLayerIds = [placementLayer.id];
+        bindLayer(placementProject);
+        editor.selectLayers();
+        assert(!outlines().length && !overlay.hidden && hit.style.display === '', 'Single selection clears other outlines and restores active handles');
     } finally { placementFixture.remove(); }
     const paddedRecord = { ...record, width: 3, height: 2, cols: 3, rows: 2, cells: Array(6).fill(null), referenceRect: { x: 1, y: 0, width: 2, height: 2 } };
     assert(validateProject(paddedRecord) === paddedRecord, 'Padded boards with a placed reference accepted');

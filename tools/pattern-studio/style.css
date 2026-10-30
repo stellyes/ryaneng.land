@@ -631,12 +631,14 @@ output {
 .stroke-options label {
   flex-basis: 100%;
 }
-.object-settings #stroke-range {
+.object-settings #stroke-range,
+.object-settings #adjustment-range {
   flex: 1;
   width: auto;
   min-width: 0;
 }
-.object-settings #stroke-width {
+.object-settings #stroke-width,
+.object-settings #adjustment-intensity {
   width: 64px;
 }
 #stroke-help {
@@ -645,6 +647,80 @@ output {
 #object-overlay {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+}
+#brush-preview {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+#text-settings {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+#text-settings textarea,
+#text-settings select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+#text-settings textarea {
+  resize: vertical;
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  padding: 6px;
+}
+#text-settings input[type="number"] {
+  width: 90px;
+}
+#text-font-picker {
+  position: relative;
+  min-width: 0;
+}
+#text-font-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+}
+#text-font-current {
+  min-width: 0;
+  overflow: hidden;
+}
+#text-font-picker svg {
+  display: block;
+  height: 20px;
+  max-width: 100%;
+}
+#text-font-options {
+  max-height: 260px;
+  overflow: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 12px #0006;
+}
+#text-font-options button {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
+}
+#text-font-options [aria-selected="true"] {
+  border-color: var(--accent);
+}
+.layer-text-badge {
+  font: bold 16px Georgia, serif;
+  color: var(--accent);
+}
+#brush-outline {
+  position: absolute;
+  outline: 1px solid #fff;
+  box-shadow: inset 0 0 0 1px #202020;
   pointer-events: none;
 }
 #object-outline {
@@ -696,20 +772,46 @@ output {
   touch-action: none;
   cursor: move;
 }
-#object-overlay .rotation-handle {
-  background: var(--accent);
-  font: 20px/1 sans-serif;
-  cursor: grab;
+#object-overlay [data-resize] {
+  width: 12px;
+  height: 12px;
+  border-width: 1px;
+  border-radius: 0;
+  z-index: 2;
+  cursor: nwse-resize;
 }
-#object-dimensions {
+#object-overlay [data-resize="ne"],
+#object-overlay [data-resize="sw"] {
+  cursor: nesw-resize;
+}
+#object-overlay .rotation-zone {
   position: absolute;
-  transform: translate(12px, -100%);
-  padding: 2px 5px;
-  border: 1px solid #fff;
-  background: #000;
-  color: #fff;
-  font: 11px/1.5 sans-serif;
-  white-space: nowrap;
+  width: 32px;
+  height: 32px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cpath d='M6 17A9 9 0 0 1 17 6M6 12v5h5M12 6h5v5' fill='none' stroke='white' stroke-width='4' stroke-linejoin='round'/%3E%3Cpath d='M6 17A9 9 0 0 1 17 6M6 12v5h5M12 6h5v5' fill='none' stroke='black' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") 12 12, crosshair;
+}
+#object-overlay .rotation-zone:hover {
+  background: transparent;
+}
+#object-overlay .rotation-zone:active {
+  cursor: grabbing;
+}
+#object-overlay .rotation-zone:focus-visible {
+  outline: 1px dashed var(--accent);
+}
+.selected-layer-outlines rect {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 1px #000);
   pointer-events: none;
 }
 #canvas-stage {
@@ -1059,6 +1161,7 @@ input[type="color"] {
   min-height: 120px;
   position: relative;
   overflow: auto;
+  overflow-anchor: none;
   padding: 0;
   background-color: #0005;
   background-image: radial-gradient(#f1daa833 1px, transparent 1px);

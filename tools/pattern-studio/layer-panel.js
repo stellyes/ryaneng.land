@@ -431,6 +431,13 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
                     if (event.key === 'Escape') { name.value = layer.name; name.blur(); }
                 });
                 row.append(visibility, name);
+                if (layer.text) {
+                    const badge = document.createElement('span');
+                    badge.className = 'layer-text-badge';
+                    badge.textContent = 'T';
+                    badge.title = 'Editable SVG text layer';
+                    row.append(badge);
+                }
                 if (layer.type === 'layer') {
                     const badges = document.createElement('span');
                     badges.className = 'layer-badges';

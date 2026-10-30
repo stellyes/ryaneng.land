@@ -1,15 +1,17 @@
 import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from './model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
-import { MAX_STROKE, brush, strokeWidth } from './objects.js';
+import { MAX_STROKE, brush, brushBounds, strokeWidth } from './objects.js';
 import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchCustomMix, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
 import { createImportPreview } from './import-preview.js';
 import { activeLayer, bindLayer, migrateLayers, serializeLayers, flattenLayers, layerOrder, layerVisible,
-    createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, layerBounds, transformLayers,
-    layerRaster, layerPixels, checkLayerMemory } from './layers.js';
+    createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, transformLayers,
+    layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom } from './layers.js';
 import { createLayerPanel } from './layer-panel.js';
 import { pixelColor, pixelWord } from './blending.js';
-import { showGrid, createTransparencyPattern } from './display.js';
+import { showGrid, createTransparencyPattern, canvasLayout, stepZoom, MIN_ZOOM, MAX_ZOOM } from './display.js';
+import { adjustBrush } from './adjustments.js';
+import { fontCatalog, loadSvgFont, layoutText, rasterText, fontNamePreview } from './text.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -30,6 +32,8 @@ let pan = null;
 let cursor = { x: 0, y: 0 };
 let keyboardFocus = false;
 let pointerFocus = false;
+let brushPointer = null;
+let spaceHeld = false, pointerOverWorkspace = false;
 let timer;
 let dirty = false;
 let revision = 0;
@@ -40,8 +44,17 @@ let zoom = 1;
 let crop = null;
 let cropDrag = null;
 let settingsPanel = null;
+let textEditGeneration = 0;
+let creatingText = false;
+let textPanelLayerId = null;
 const STROKE_KEY = 'pattern-studio-stroke-widths';
-const strokeWidths = { paint: 1, line: 1, shape: 1 };
+const strokeWidths = { paint: 1, erase: 1, line: 1, shape: 1, dodge: 1, burn: 1, sponge: 1 };
+const adjustmentTools = ['dodge', 'burn', 'sponge'];
+const adjustmentSettings = {
+    dodge: { intensity: 50, range: 'midtones' },
+    burn: { intensity: 50, range: 'midtones' },
+    sponge: { intensity: 50, mode: 'saturate' },
+};
 try {
     const saved = JSON.parse(localStorage.getItem(STROKE_KEY) || '{}');
     for (const key of Object.keys(strokeWidths)) strokeWidths[key] = strokeWidth(saved[key]);
@@ -51,18 +64,21 @@ const placement = createPlacementEditor({
     getSnapping: () => $('snapping-toggle').checked,
     canTransform: () => canTransform(activeLayer(project)),
     redraw: () => renderPlacement(), updateControls, notify,
-    commitLayerPixels(entries, erase = false) {
+    commitLayerPixels(entries, erase = false, text = null) {
         const layer = activeLayer(project);
         if (!layerVisible(project, layer)) throw new Error('Show this layer and its folders before editing.');
         if (!erase && !canTransform(layer)) throw new Error('Unlock this layer position before transforming.');
+        if (layer.text && !text) throw new Error('Text layers must be edited as text, not painted pixels.');
         const remaining = erase ? [...layerPixels(project, layer)].filter(([, , color]) =>
             !canWrite(layer, color) || layer.locks.transparency) : entries;
         const raster = layerRaster(project, remaining);
         if (raster.cells.every((color, i) => layer.cells[i] === color) &&
-            JSON.stringify(raster.offCanvas) === JSON.stringify(layer.offCanvas || [])) return false;
+            JSON.stringify(raster.offCanvas) === JSON.stringify(layer.offCanvas || []) &&
+            (!text || JSON.stringify(text.matrix) === JSON.stringify(layer.text.matrix))) return false;
         checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
         remember(snapshot());
         Object.assign(layer, raster);
+        if (text) layer.text = text;
         bindLayer(project);
         changed();
         return true;
@@ -70,6 +86,7 @@ const placement = createPlacementEditor({
     commitPixels(pixels, replace = false) {
         const layer = activeLayer(project);
         if (!project || layer?.type !== 'layer') { notify('Select a pixel layer before editing.', true); return false; }
+        if (layer.text) { notify('Choose a paint layer before painting or pasting. Edit text in Tool options.', true); return false; }
         if (!layerVisible(project, layer)) { notify('Show this layer and its folder before editing.', true); return false; }
         if (replace && !canTransform(layer)) { notify('This layer is position-locked.', true); return false; }
         const changes = replace
@@ -96,9 +113,7 @@ const layerPanel = createLayerPanel({
         return placement.commit() !== false;
     },
     select() {
-        const layer = activeLayer(project);
-        if (layer?.type === 'layer') placement.selectLayer(layerBounds(project, layer));
-        else placement.cancel(true);
+        placement.selectLayers();
     },
 });
 
@@ -163,8 +178,11 @@ function prepareSampler() {
 }
 
 function restoreSnapshot(saved) {
+    placement.cancel(true);
     const { referenceImage, ...data } = saved;
     Object.assign(project, data);
+    textPanelLayerId = null;
+    textEditGeneration++;
     bindLayer(project);
     reference = referenceImage;
     prepareSampler();
@@ -177,7 +195,8 @@ function remember(before) {
     const cost = () => {
         const images = new Set();
         return history.reduce((sum, item) => {
-            let size = item.layers.reduce((count, layer) => count + (layer.cells?.length || 0) + (layer.offCanvas?.length || 0) * 3, 0);
+            let size = item.layers.reduce((count, layer) => count + (layer.cells?.length || 0) + (layer.offCanvas?.length || 0) * 3 +
+                (layer.text?.paths.reduce((sum, path) => sum + path.d.length / 4, 0) || 0), 0);
             if (!images.has(item.referenceImage)) {
                 images.add(item.referenceImage);
                 size += item.width * item.height + item.reference.length / 4;
@@ -243,7 +262,8 @@ async function protectUnsaved() {
 }
 
 function toolPanel() {
-    return ['paint', 'line', 'shape', 'select'].includes(tool) ? 'object' : null;
+    if (tool === 'text') return 'text';
+    return ['paint', 'erase', 'line', 'shape', 'select', ...adjustmentTools].includes(tool) ? 'object' : null;
 }
 
 function activeStrokeKind() {
@@ -252,7 +272,7 @@ function activeStrokeKind() {
         return placement.kind === 'shape' && !placement.filled ? 'shape' : null;
     }
     if (tool === 'shape') return $('shape-fill').value === 'filled' ? null : 'shape';
-    return ['paint', 'line'].includes(tool) ? tool : null;
+    return ['paint', 'erase', 'line', ...adjustmentTools].includes(tool) ? tool : null;
 }
 
 function setStrokeWidth(value) {
@@ -284,8 +304,23 @@ function updateControls() {
     $('copy').disabled = !active || Boolean(crop) || !placement.selecting;
     $('cut').disabled = !active || Boolean(crop) || !placement.selecting;
     $('paste').disabled = !active || Boolean(crop) || !placement.canPaste;
-    if (placement.active && !crop) settingsPanel = 'object';
-    for (const panel of ['object', 'grid', 'crop']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
+    const textLayer = activeLayer(project)?.text ? activeLayer(project) : null;
+    if (placement.active && !crop) settingsPanel = textLayer ? 'text' : 'object';
+    else if (textLayer && !crop && !['grid', 'crop'].includes(settingsPanel)) settingsPanel = 'text';
+    else if (!textLayer && settingsPanel === 'text' && tool !== 'text') settingsPanel = toolPanel();
+    for (const panel of ['object', 'grid', 'crop', 'text']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
+    $('text-new').disabled = !active || Boolean(crop) || creatingText;
+    $('text-rasterize').disabled = !textLayer || textLayer.locks.all || Boolean(crop);
+    for (const id of ['text-content', 'text-font', 'text-size', 'text-color']) $(id).disabled = !textLayer || textLayer.locks.all || Boolean(crop);
+    if (textLayer) {
+        const fresh = textPanelLayerId !== textLayer.id;
+        for (const [id, value] of [['text-content', textLayer.text.content], ['text-font', textLayer.text.font],
+            ['text-size', textLayer.text.size], ['text-color', textLayer.text.color]]) {
+            if (fresh || document.activeElement !== $(id)) $(id).value = value;
+        }
+        textPanelLayerId = textLayer.id;
+    } else textPanelLayerId = null;
+    syncFontPicker();
     $('settings-dock').hidden = !active;
     const placeholder = $('tool-placeholder');
     placeholder.hidden = Boolean(settingsPanel);
@@ -305,20 +340,51 @@ function updateControls() {
     for (const key of ['width', 'height', 'angle']) $(`object-${key}`).disabled = !placement.active;
     const strokeKind = activeStrokeKind();
     $('stroke-options').hidden = !strokeKind;
-    $('placement-actions').hidden = $('object-help').hidden = tool === 'paint' && !placement.active;
+    $('placement-actions').hidden = $('object-help').hidden = (['paint', 'erase'].includes(tool) || adjustmentTools.includes(tool)) && !placement.active;
+    const adjusting = adjustmentTools.includes(tool) && !placement.active;
+    $('adjustment-options').hidden = !adjusting;
+    if (adjusting) {
+        const settings = adjustmentSettings[tool];
+        $('adjustment-intensity').value = $('adjustment-range').value = settings.intensity;
+        $('tone-options').hidden = tool === 'sponge';
+        $('sponge-options').hidden = tool !== 'sponge';
+        if (tool === 'sponge') $('sponge-mode').value = settings.mode;
+        else $('tone-range').value = settings.range;
+    }
     if (strokeKind) {
-        $('stroke-label').textContent = { paint: 'Brush size', line: 'Line width', shape: 'Outline width' }[strokeKind];
+        $('stroke-label').textContent = { line: 'Line width', shape: 'Outline width' }[strokeKind] || 'Brush size';
         $('stroke-width').value = $('stroke-range').value = strokeWidths[strokeKind];
     }
     $('save-now').disabled = !active;
-    $('zoom-out').disabled = !active || zoom <= 1;
-    $('zoom-in').disabled = !active || zoom >= 8;
+    $('zoom-out').disabled = !active || zoom <= MIN_ZOOM;
+    $('zoom-in').disabled = !active || zoom >= MAX_ZOOM;
     if (active) {
         const rect = referenceRect(project);
             $('dimensions').textContent = `${project.cols} x ${project.rows} cells${project.blank ? ' | Blank canvas' : ` | Reference ${rect.width} x ${rect.height}px`}`;
         $('grid-size').value = Math.max(project.cols, project.rows);
         $('grid-number').value = $('grid-size').value;
     }
+    renderBrushPreview();
+}
+
+function renderBrushPreview() {
+    const overlay = $('brush-preview'), outline = $('brush-outline');
+    overlay.hidden = true;
+    if (!brushPointer || !project || !largeScreen.matches || crop || pan || spaceHeld || placement.active ||
+        !['paint', 'erase', ...adjustmentTools].includes(tool) || document.querySelector('dialog[open]')) return;
+    const rect = canvas.getBoundingClientRect();
+    const { clientX, clientY } = brushPointer;
+    if (!rect.width || !rect.height || clientX < rect.left || clientX >= rect.right ||
+        clientY < rect.top || clientY >= rect.bottom || !inWorkspaceViewport(brushPointer)) return;
+    const cell = cellAt(brushPointer);
+    const bounds = brushBounds(cell.x, cell.y, strokeWidths[tool]);
+    const left = Math.max(0, bounds.x), top = Math.max(0, bounds.y);
+    const right = Math.min(project.cols, bounds.x + bounds.width), bottom = Math.min(project.rows, bounds.y + bounds.height);
+    Object.assign(outline.style, {
+        left: `${left / project.cols * 100}%`, top: `${top / project.rows * 100}%`,
+        width: `${(right - left) / project.cols * 100}%`, height: `${(bottom - top) / project.rows * 100}%`,
+    });
+    overlay.hidden = false;
 }
 
 function renderPalette() {
@@ -600,19 +666,24 @@ $('yarn-line').addEventListener('change', () => setYarnLine($('yarn-line').value
 function layoutCanvas() {
     const wrap = $('canvas-wrap');
     const workspace = $('workspace');
-    const pad = rulerPadding();
-    const fit = Math.min((workspace.clientWidth - pad.x * 2) / project.width, (workspace.clientHeight - pad.y * 2) / project.height);
-    if (fit <= 0) return null;
-    const width = Math.max(1, Math.floor(project.width * fit * zoom));
-    const height = Math.max(1, Math.floor(project.height * fit * zoom));
-    wrap.style.padding = `${pad.y}px ${pad.x}px`;
-    wrap.style.width = `${Math.max(workspace.clientWidth, width + pad.x * 2)}px`;
-    wrap.style.height = `${Math.max(workspace.clientHeight, height + pad.y * 2)}px`;
+    const layout = canvasLayout(project, workspace.clientWidth, workspace.clientHeight, rulerPadding(), zoom, !crop);
+    if (!layout) return null;
+    const { width, height, padX, padY, wrapWidth, wrapHeight } = layout;
+    wrap.style.padding = `${padY}px ${padX}px`;
+    wrap.style.width = `${wrapWidth}px`;
+    wrap.style.height = `${wrapHeight}px`;
     // Keep the display bitmap bounded on large monitors; CSS zoom and hit testing remain exact.
     const dpr = Math.min(devicePixelRatio || 1, 2, 8192 / Math.max(width, height));
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
+    renderBrushPreview();
     return { bitmapWidth: Math.round(width * dpr), bitmapHeight: Math.round(height * dpr) };
+}
+
+function centerCanvas() {
+    const workspace = $('workspace');
+    workspace.scrollTo((workspace.scrollWidth - workspace.clientWidth) / 2,
+        (workspace.scrollHeight - workspace.clientHeight) / 2);
 }
 
 function render({ paint = true } = {}) {
@@ -983,6 +1054,7 @@ async function activate(data) {
     renderPalette();
     layerPanel.render();
     render();
+    centerCanvas();
     return true;
 }
 
@@ -1047,6 +1119,10 @@ function previewSample(event) {
 function needsPaintColor() {
     if (tool === 'select') return false;
     const layer = activeLayer(project);
+    if (layer?.text) {
+        notify('This is an editable text layer. Use Tool options to change its text, or rasterize it before painting.', true);
+        return true;
+    }
     if (!layer || layer.type !== 'layer' || layer.locks.all || (layer.locks.color && layer.locks.transparency)) {
         notify(layer?.type === 'folder' ? 'Select a pixel layer to paint.' : 'This layer is locked for pixel editing.', true);
         return true;
@@ -1085,6 +1161,12 @@ function applyCell(x, y) {
         if (blocked && !painted) notify('This edit is blocked by the layer locks.', true);
         return painted;
     };
+    if (adjustmentTools.includes(tool)) {
+        const result = adjustBrush(project, layer, x, y, strokeWidths[tool],
+            { tool, ...adjustmentSettings[tool] }, stroke?.visited);
+        blocked = result.blocked;
+        return finish(result.changed);
+    }
     if (tool === 'fill') {
         const cells = layer.cells.slice();
         if (!flood(cells, project.cols, project.rows, x, y, color)) return false;
@@ -1092,9 +1174,9 @@ function applyCell(x, y) {
         for (let i = 0; i < cells.length; i++) if (cells[i] !== layer.cells[i]) painted = write(i, cells[i]) || painted;
         return finish(painted);
     }
-    if (tool === 'paint') {
+    if (tool === 'paint' || tool === 'erase') {
         let painted = false;
-        brush(x, y, strokeWidths.paint, (bx, by) => {
+        brush(x, y, strokeWidths[tool], (bx, by) => {
             if (bx < 0 || by < 0 || bx >= project.cols || by >= project.rows) return;
             const index = by * project.cols + bx;
             if (write(index, color)) painted = true;
@@ -1106,7 +1188,7 @@ function applyCell(x, y) {
 }
 
 function renderStroke(from, to) {
-    const reach = tool === 'paint' ? strokeWidth(strokeWidths.paint) : 1;
+    const reach = ['paint', 'erase', ...adjustmentTools].includes(tool) ? strokeWidth(strokeWidths[tool]) : 1;
     renderCells(
         Math.min(from.x, to.x) - reach, Math.min(from.y, to.y) - reach,
         Math.max(from.x, to.x) + reach, Math.max(from.y, to.y) + reach,
@@ -1135,6 +1217,12 @@ canvas.addEventListener('pointerdown', event => {
         placement.begin(event, tool);
         return;
     }
+    if (tool === 'text') {
+        const layer = activeLayer(project);
+        if (layer?.text) placement.selectLayers();
+        else notify('Add a text layer using New text layer in Tool options.', true);
+        return;
+    }
     if (tool === 'sample') {
         try {
             render();
@@ -1148,7 +1236,7 @@ canvas.addEventListener('pointerdown', event => {
     if (placement.begin(event, tool)) return;
     const position = cellAt(event), previousCursor = cursor;
     cursor = position;
-    stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false };
+    stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false, visited: new Set() };
     canvas.setPointerCapture(event.pointerId);
     stroke.changed = applyCell(position.x, position.y);
     if (tool === 'fill') return render();
@@ -1175,17 +1263,33 @@ canvas.addEventListener('pointermove', event => {
     }
     stroke.last = position;
 });
-canvas.addEventListener('pointerleave', () => { $('sample-preview').hidden = true; });
+for (const name of ['pointerenter', 'pointermove', 'pointerdown']) canvas.addEventListener(name, event => {
+    if (!event.isPrimary) return;
+    brushPointer = { clientX: event.clientX, clientY: event.clientY };
+    renderBrushPreview();
+});
+canvas.addEventListener('pointerleave', () => {
+    $('sample-preview').hidden = true;
+    brushPointer = null;
+    renderBrushPreview();
+});
 $('workspace').addEventListener('scroll', () => {
     $('sample-preview').hidden = true;
     paintVisibleTiles();
     drawRulers();
+    renderBrushPreview();
 });
 for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, finishStroke);
 canvas.addEventListener('pointerup', event => {
     if (event.pointerType === 'touch') $('sample-preview').hidden = true;
+    if (event.pointerType === 'touch') { brushPointer = null; renderBrushPreview(); }
 });
-canvas.addEventListener('pointercancel', () => { $('sample-preview').hidden = true; });
+canvas.addEventListener('pointercancel', () => {
+    $('sample-preview').hidden = true;
+    brushPointer = null;
+    renderBrushPreview();
+});
+window.addEventListener('blur', () => { brushPointer = null; renderBrushPreview(); });
 canvas.addEventListener('focus', () => {
     if (pointerFocus) return;
     keyboardFocus = true;
@@ -1220,6 +1324,7 @@ function startPan(event) {
     pan = { id: event.pointerId, x: event.clientX, y: event.clientY, left: workspace.scrollLeft, top: workspace.scrollTop };
     workspace.setPointerCapture(event.pointerId);
     workspace.classList.add('panning');
+    renderBrushPreview();
 }
 
 $('workspace').addEventListener('pointerdown', event => {
@@ -1235,11 +1340,11 @@ $('workspace').addEventListener('pointerdown', event => {
 
 // Holding Space pans with any tool, like Move. Capturing here keeps the press away from the canvas,
 // placement handles, and click-away, so it never paints or finalizes a line, shape, or paste.
-let spaceHeld = false, pointerOverWorkspace = false;
 function setSpaceHeld(value) {
     spaceHeld = value;
     $('workspace').classList.toggle('space-pan', value);
     if (value) $('sample-preview').hidden = true;
+    renderBrushPreview();
 }
 $('workspace').addEventListener('pointerenter', () => { pointerOverWorkspace = true; });
 $('workspace').addEventListener('pointerleave', () => { pointerOverWorkspace = false; });
@@ -1303,6 +1408,10 @@ canvas.addEventListener('keydown', event => {
     if (moves[event.key]) {
         event.preventDefault();
         finishStroke();
+        if (tool === 'text') {
+            if (activeLayer(project)?.text) placement.selectLayers();
+            return;
+        }
         cursor.x = Math.max(0, Math.min(project.cols - 1, cursor.x + moves[event.key][0]));
         cursor.y = Math.max(0, Math.min(project.rows - 1, cursor.y + moves[event.key][1]));
         keyboardFocus = true;
@@ -1334,6 +1443,12 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     finishStroke();
     placement.commit();
     tool = button.dataset.tool;
+    if (tool === 'text') {
+        settingsPanel = 'text';
+        ensureTextFonts().catch(report);
+        if (activeLayer(project)?.text) placement.selectLayers();
+        else createTextLayer().catch(report);
+    }
     settingsPanel = toolPanel();
     canvas.classList.toggle('sampling', tool === 'sample');
     $('workspace').classList.toggle('moving', tool === 'move');
@@ -1343,10 +1458,204 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     render();
     if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
     if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. With any tool, hold Space and drag to pan. Choose Paint to resume drawing.');
+    if (adjustmentTools.includes(tool)) notify('Brush over painted pixels on the active layer. Each pixel is adjusted once per stroke; release and brush again to build the effect. No palette color is needed.');
     if (['line', 'shape', 'select'].includes(tool)) notify(tool === 'select'
         ? 'Drag a selection on the grid, then Copy or Cut and Paste.'
         : 'Drag to draw. Adjust handles and palette color, then click away or Apply to finalize.');
 }));
+
+async function ensureTextFonts() {
+    const entries = await fontCatalog();
+    if (!$('text-font').options.length) {
+        $('text-font').replaceChildren(...entries.map(entry => new Option(entry.name, entry.file)));
+        for (const entry of entries) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.role = 'option';
+            button.tabIndex = -1;
+            button.dataset.font = entry.file;
+            button.textContent = entry.name;
+            button.setAttribute('aria-label', entry.name);
+            button.addEventListener('click', () => {
+                $('text-font').value = entry.file;
+                closeFontPicker();
+                syncFontPicker();
+                $('text-font').dispatchEvent(new Event('change'));
+                $('text-font-toggle').focus({ preventScroll: true });
+            });
+            $('text-font-options').append(button);
+            loadSvgFont(entry.file).then(font => {
+                button.replaceChildren(fontNamePreview(font, entry));
+                syncFontPicker();
+            }).catch(error => report(new Error(`Font preview unavailable for ${entry.name}: ${error.message}`)));
+        }
+        syncFontPicker();
+    }
+    return entries;
+}
+
+function closeFontPicker() {
+    $('text-font-options').hidden = true;
+    $('text-font-toggle').setAttribute('aria-expanded', 'false');
+}
+
+function syncFontPicker() {
+    const select = $('text-font'), toggle = $('text-font-toggle');
+    toggle.disabled = select.disabled;
+    const options = [...$('text-font-options').children];
+    for (const option of options) option.setAttribute('aria-selected', String(option.dataset.font === select.value));
+    const selected = options.find(option => option.dataset.font === select.value);
+    if (selected) {
+        const current = $('text-font-current');
+        current.replaceChildren(...[...selected.childNodes].map(node => node.cloneNode(true)));
+        current.setAttribute('aria-label', selected.getAttribute('aria-label'));
+    }
+    if (toggle.disabled || $('text-settings').hidden) closeFontPicker();
+}
+
+$('text-font-toggle').addEventListener('click', () => {
+    const open = $('text-font-options').hidden;
+    $('text-font-options').hidden = !open;
+    $('text-font-toggle').setAttribute('aria-expanded', String(open));
+    if (open) $('text-font-options').querySelector('[aria-selected="true"]')?.focus({ preventScroll: true });
+});
+$('text-font-picker').addEventListener('keydown', event => {
+    const options = [...$('text-font-options').children];
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeFontPicker();
+        $('text-font-toggle').focus({ preventScroll: true });
+    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && options.length) {
+        event.preventDefault();
+        $('text-font-options').hidden = false;
+        $('text-font-toggle').setAttribute('aria-expanded', 'true');
+        const index = options.indexOf(document.activeElement);
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 :
+            (index + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length;
+        options[next].focus({ preventScroll: true });
+    }
+});
+document.addEventListener('click', event => {
+    if (!$('text-font-picker').contains(event.target)) closeFontPicker();
+});
+$('text-font-picker').addEventListener('focusout', event => {
+    if (!$('text-font-picker').contains(event.relatedTarget)) closeFontPicker();
+});
+
+async function createTextLayer() {
+    if (!project || crop || creatingText) return;
+    if (placement.commit() === false) return;
+    const owner = project;
+    creatingText = true;
+    updateControls();
+    try {
+        const entries = await ensureTextFonts(), file = entries[0].file;
+        const font = await loadSvgFont(file);
+        if (project !== owner || crop) throw new Error('The project changed while loading the text font. Try adding text again.');
+        layerRoom(project, true);
+        const { text } = layoutText(font, { content: 'Text', font: file, size: Math.min(24, Math.max(4, Math.floor(project.rows / 3))),
+            color: selected || '#000000', matrix: [1, 0, 0, 1, Math.floor(project.cols / 4), Math.floor(project.rows / 4)] });
+        const layer = newLayer(project.cols, project.rows, 'Text');
+        Object.assign(layer, { text }, layerRaster(project, rasterText(text)));
+        checkLayerMemory(project, [...project.layers, layer]);
+        const current = activeLayer(project);
+        layer.parentId = current?.type === 'folder' ? current.id : current?.parentId || null;
+        const parent = project.layers.find(item => item.id === layer.parentId);
+        const before = snapshot();
+        if (parent) parent.expanded = true;
+        project.layers.splice(Math.max(0, project.layers.indexOf(current)), 0, layer);
+        project.activeLayerId = layer.id;
+        project.selectedLayerIds = [layer.id];
+        bindLayer(project);
+        remember(before);
+        settingsPanel = 'text';
+        changed();
+        placement.selectLayers();
+        render();
+        $('tools-dock').open = true;
+        $('text-content').focus();
+        $('text-content').select();
+        notify('Text layer created. Type in Tool options; drag its box to move, its corners to scale, or outside a corner to rotate.');
+    } finally { creatingText = false; updateControls(); }
+}
+
+async function editTextLayer() {
+    const owner = project, layer = activeLayer(project);
+    if (!layer?.text) return;
+    const generation = ++textEditGeneration;
+    const values = { content: $('text-content').value, font: $('text-font').value,
+        size: Number($('text-size').value), color: $('text-color').value };
+    const checkEditing = () => {
+        if (layer.locks.all || layer.locks.color || layer.locks.transparency) throw new Error('Unlock text pixel locks before changing text, font, size, or color.');
+        if (!layerVisible(project, layer)) throw new Error('Show this text layer and its folders before editing.');
+        if (layer.locks.position && (values.size !== layer.text.size || values.font !== layer.text.font)) throw new Error('Unlock the text layer position before changing font or size.');
+    };
+    try {
+        checkEditing();
+        if (!$('text-size').value.trim()) throw new Error('Font size must be a whole number from 1 to 500 cells.');
+        const font = await loadSvgFont(values.font);
+        if (generation !== textEditGeneration || project !== owner || activeLayer(project) !== layer || crop) return;
+        checkEditing();
+        if (placement.commit() === false) return;
+        const { text, missing } = layoutText(font, { ...values, matrix: layer.text.matrix });
+        const raster = layerRaster(project, rasterText(text));
+        if (JSON.stringify(text) === JSON.stringify(layer.text)) return;
+        checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
+        remember(snapshot());
+        Object.assign(layer, { text }, raster);
+        bindLayer(project);
+        changed();
+        placement.selectLayers();
+        render();
+        if (missing.length) notify(`Font has no glyph for: ${missing.join(' ')}. Missing-character boxes are shown.`, true);
+    } catch (error) {
+        report(error);
+        textPanelLayerId = null;
+        updateControls();
+    }
+}
+
+$('text-new').addEventListener('click', () => createTextLayer().catch(report));
+for (const id of ['text-content', 'text-color']) $(id).addEventListener('input', editTextLayer);
+for (const id of ['text-font', 'text-size']) $(id).addEventListener('change', editTextLayer);
+$('text-size').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); event.target.dispatchEvent(new Event('change')); }
+});
+$('text-rasterize').addEventListener('click', () => {
+    const layer = activeLayer(project);
+    if (!layer?.text) return;
+    if (layer.locks.all) { notify('Unlock this text layer before rasterizing it.', true); return; }
+    if (placement.commit() === false) return;
+    remember(snapshot());
+    delete layer.text;
+    settingsPanel = toolPanel();
+    changed();
+    placement.selectLayers();
+    notify('Text rasterized to editable pixels. Undo restores the editable text.');
+});
+ensureTextFonts().then(updateControls).catch(report);
+
+for (const id of ['adjustment-intensity', 'adjustment-range']) $(id).addEventListener(id === 'adjustment-range' ? 'input' : 'change', event => {
+    if (!adjustmentTools.includes(tool)) return;
+    const value = Number(event.target.value);
+    if (!event.target.value.trim() || !Number.isInteger(value) || value < 0 || value > 100) {
+        notify('Intensity must be a whole number from 0 to 100.', true);
+        event.target.value = adjustmentSettings[tool].intensity;
+        return;
+    }
+    finishStroke();
+    adjustmentSettings[tool].intensity = value;
+    updateControls();
+});
+$('adjustment-intensity').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); event.target.dispatchEvent(new Event('change')); }
+});
+for (const [id, key] of [['tone-range', 'range'], ['sponge-mode', 'mode']]) $(id).addEventListener('change', event => {
+    if (!adjustmentTools.includes(tool)) return;
+    finishStroke();
+    adjustmentSettings[tool][key] = event.target.value;
+});
 
 function undo() {
     if (crop) return;
@@ -1391,11 +1700,20 @@ document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey || !project || crop || !largeScreen.matches ||
         document.querySelector('dialog[open]')) return;
     const target = event.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"], .sidebar-panel > summary'))) {
+    if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]'))) {
         if (event.key === 'Escape' && target.closest('#object-settings')) placement.keydown(event);
         return;
     }
     const key = event.key.toLowerCase();
+    if (!(event.ctrlKey || event.metaKey || event.shiftKey) && (key === '[' || key === ']')) {
+        const kind = activeStrokeKind();
+        if (!kind || spaceHeld || pan) return;
+        event.preventDefault();
+        finishStroke();
+        setStrokeWidth(Math.max(1, Math.min(MAX_STROKE, strokeWidths[kind] + (key === ']' ? 1 : -1))));
+        return;
+    }
+    if (target instanceof Element && target.closest('.sidebar-panel > summary')) return;
     if ((event.ctrlKey || event.metaKey) && ['c', 'x', 'v'].includes(key)) {
         event.preventDefault();
         finishStroke();
@@ -1415,7 +1733,7 @@ function setZoom(value, anchor) {
     const anchorY = anchor ? anchor.y : viewport.top + workspace.clientHeight / 2;
     const centerX = (anchorX - previous.left) / previous.width;
     const centerY = (anchorY - previous.top) / previous.height;
-    zoom = Math.max(1, Math.min(8, value));
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
     updateControls();
     // Resize the element now and let the browser stretch the existing bitmap; reallocating and
     // repainting it at full resolution costs far more, so that waits until zooming pauses.
@@ -1434,8 +1752,8 @@ function setZoom(value, anchor) {
     zoomSettleTimer = setTimeout(render, ZOOM_SETTLE_MS);
 }
 const ZOOM_SETTLE_MS = 150;
-action('zoom-in', () => setZoom(zoom + 0.25));
-action('zoom-out', () => setZoom(zoom - 0.25));
+action('zoom-in', () => setZoom(stepZoom(zoom, 1)));
+action('zoom-out', () => setZoom(stepZoom(zoom, -1)));
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey || !(event.ctrlKey || event.metaKey) ||
         !project || !largeScreen.matches || document.querySelector('dialog[open]')) return;
@@ -1444,7 +1762,7 @@ document.addEventListener('keydown', event => {
     // Zoom the pattern instead of the browser page; at the limits the shortcut is still consumed.
     event.preventDefault();
     const button = $(step > 0 ? 'zoom-in' : 'zoom-out');
-    if (!button.disabled) setZoom(zoom + step * 0.25);
+    if (!button.disabled) setZoom(stepZoom(zoom, step));
 });
 let wheelZoomDelta = 0;
 $('workspace').addEventListener('wheel', event => {
@@ -1456,7 +1774,7 @@ $('workspace').addEventListener('wheel', event => {
     if (Math.abs(wheelZoomDelta) < 50) return;
     const step = wheelZoomDelta < 0 ? 1 : -1;
     wheelZoomDelta = 0;
-    const next = Math.max(1, Math.min(8, zoom + step * 0.25));
+    const next = stepZoom(zoom, step);
     if (next !== zoom) setZoom(next, { x: event.clientX, y: event.clientY });
 }, { passive: false });
 document.addEventListener('keydown', event => {
@@ -1519,7 +1837,8 @@ function applyGrid() {
     const before = snapshot();
     const oldCols = project.cols, oldRows = project.rows;
     transformLayers(project, cells => resizeCells(cells, oldCols, oldRows, cols, rows), cols, rows,
-        (x, y) => [Math.floor((x + 0.5) * cols / oldCols), Math.floor((y + 0.5) * rows / oldRows)]);
+        (x, y) => [Math.floor((x + 0.5) * cols / oldCols), Math.floor((y + 0.5) * rows / oldRows)],
+        [cols / oldCols, 0, 0, rows / oldRows, 0, 0]);
     remember(before);
     cursor = { x: 0, y: 0 };
     changed(); render();
@@ -1696,7 +2015,8 @@ function exitCrop(applied = false) {
     updateControls();
     renderPalette();
     render();
-    $('workspace').scrollTo(applied ? 0 : previous.x, applied ? 0 : previous.y);
+    if (applied) centerCanvas();
+    else $('workspace').scrollTo(previous.x, previous.y);
     canvas.focus({ preventScroll: true });
 }
 
@@ -1819,7 +2139,9 @@ function applyCrop() {
     const before = snapshot();
     transformLayers(project, cells => cropCells({ ...project, cells }, rect, cols, rows), cols, rows,
         (x, y) => [Math.floor(((x + 0.5) * project.width / project.cols - rect.x) * cols / rect.width),
-            Math.floor(((y + 0.5) * project.height / project.rows - rect.y) * rows / rect.height)]);
+            Math.floor(((y + 0.5) * project.height / project.rows - rect.y) * rows / rect.height)],
+        [project.width / project.cols * cols / rect.width, 0, 0, project.height / project.rows * rows / rect.height,
+            -rect.x * cols / rect.width, -rect.y * rows / rect.height]);
     remember(before);
     Object.assign(project, { width: rect.width, height: rect.height, referenceRect: null, reference: referenceData });
     reference = output;
