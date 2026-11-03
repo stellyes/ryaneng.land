@@ -1,4 +1,4 @@
-import { line } from './model.js';
+import { line, MAX_SIDE } from './model.js';
 
 export function boxFromCells(a, b) {
     const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
@@ -25,16 +25,20 @@ export function snapTranslation(object, dx, dy, targets, cols, rows) {
     const result = { dx: Math.round(dx), dy: Math.round(dy), guides: [] };
     for (const [axis, raw, size, source] of [
         ['x', dx, cols, [left, (left + right) / 2, right]],
-        ['y', dy, rows, [top, (top + bottom) / 2, bottom]],
+        ['y', dy, rows, [top, object.centerY ?? (top + bottom) / 2, bottom]],
     ]) {
         let best = null;
         for (const target of targets) {
             const start = target[axis], length = target[axis === 'x' ? 'width' : 'height'];
-            for (const value of [start, start + length / 2, start + length]) for (const edge of source) {
+            const center = axis === 'y' ? target.centerY ?? start + length / 2 : start + length / 2;
+            for (const value of [start, center, start + length]) for (const [index, edge] of source.entries()) {
                 const delta = value - edge, distance = Math.abs(delta - raw);
-                // Keep pixels on whole cells; unequal-parity centers cannot align exactly.
-                if (Math.abs(delta - Math.round(delta)) > 1e-8 || distance > size * 0.03) continue;
-                if (!best || distance < best.distance) best = { delta: Math.round(delta), value, distance };
+                const exactTextCenter = axis === 'y' && index === 1 && object.text;
+                // Raster pixels stay on whole cells; SVG text can move to its exact body center.
+                if ((!exactTextCenter && Math.abs(delta - Math.round(delta)) > 1e-8) || distance > size * 0.03) continue;
+                if (!best || distance < best.distance) best = {
+                    delta: exactTextCenter ? delta : Math.round(delta), value, distance,
+                };
             }
         }
         if (best) {
@@ -50,8 +54,8 @@ export function resizeObject(object, corner, point) {
     const [sx, sy] = signs[corner];
     const local = rotatePoint(point.x - object.cx, point.y - object.cy, -object.angle);
     const opposite = { x: -sx * object.width / 2, y: -sy * object.height / 2 };
-    const width = Math.max(1, Math.min(500, Math.round(sx * (local.x - opposite.x))));
-    const height = Math.max(1, Math.min(500, Math.round(sy * (local.y - opposite.y))));
+    const width = Math.max(1, Math.min(MAX_SIDE, Math.round(sx * (local.x - opposite.x))));
+    const height = Math.max(1, Math.min(MAX_SIDE, Math.round(sy * (local.y - opposite.y))));
     const center = rotatePoint(opposite.x + sx * width / 2, opposite.y + sy * height / 2, object.angle);
     return { ...object, cx: object.cx + center.x, cy: object.cy + center.y, width, height };
 }

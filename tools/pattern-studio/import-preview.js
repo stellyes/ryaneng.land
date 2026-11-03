@@ -1,4 +1,5 @@
 import { approximationDimensions } from './approximation.js';
+import { MAX_SIDE } from './model.js';
 import { CUSTOM_MIX, matchCustomMix, matchYarnLine, rankYarnLines } from './palette.js';
 
 const $ = id => document.getElementById(id);
@@ -214,9 +215,9 @@ export function createImportPreview({ loadLines, yarnOption, renderYarnColors, c
         originalContext.fillStyle = '#ffffff';
         originalContext.fillRect(0, 0, original.width, original.height);
         originalContext.drawImage(canvas, 0, 0);
-        // Shorter-side controls cannot stretch the image or exceed 500 on the longest side.
+        // Shorter-side controls preserve proportions within the longest-side limit.
         for (const [axis, size] of [['cols', canvas.width], ['rows', canvas.height]]) {
-            const max = Math.max(1, Math.round(500 * size / Math.max(canvas.width, canvas.height)));
+            const max = Math.max(1, Math.round(MAX_SIDE * size / Math.max(canvas.width, canvas.height)));
             $(`import-${axis}`).max = $(`import-${axis}-range`).max = max;
         }
         const initial = approximationDimensions(canvas.width, canvas.height, 100, canvas.width >= canvas.height ? 'cols' : 'rows');

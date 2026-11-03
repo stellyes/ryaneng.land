@@ -1,5 +1,7 @@
 import { BLEND_MODES, blendPixel, pixelColor, pixelWord, layerSeed, dissolveNoise } from './blending.js';
-import { validateText, textBounds, rasterText, transformText } from './text.js';
+import { validateText, textBounds, textCenter, rasterText, transformText } from './text.js';
+import { validateAsset, rasterAsset, transformAsset } from './assets.js';
+import { vectorBounds } from './vector.js';
 export { BLEND_MODES } from './blending.js';
 export const LOCKS = ['transparency', 'color', 'position', 'all'];
 export const MAX_LAYERS = 64;
@@ -28,6 +30,10 @@ export function checkLayerMemory(project, layers = project.layers) {
 }
 
 export function translateLayer(project, layer, dx, dy) {
+    if (layer.asset) {
+        const asset = transformAsset(layer.asset, [1, 0, 0, 1, dx, dy]);
+        return { ...layerRaster(project, rasterAsset(asset)), asset };
+    }
     if (layer.text) {
         const text = transformText(layer.text, [1, 0, 0, 1, dx, dy]);
         return { ...layerRaster(project, rasterText(text)), text };
@@ -41,14 +47,17 @@ export function alignmentPlan(project, mode) {
     const layers = layerOrder(project).filter(layer => ids.has(layer.id) &&
         (layer.cells.some(color => color !== null) || layer.offCanvas?.length));
     if (layers.length < 2) throw new Error('Select multiple layers');
-    const anchor = layerBounds(project, layers.at(-1)), horizontal = ['left', 'center-x', 'right'].includes(mode);
+    const anchor = layerAlignmentBounds(project, layers.at(-1)), horizontal = ['left', 'center-x', 'right'].includes(mode);
     const edge = bounds => horizontal
         ? mode === 'left' ? bounds.x : mode === 'right' ? bounds.x + bounds.width : bounds.x + bounds.width / 2
-        : mode === 'top' ? bounds.y : mode === 'bottom' ? bounds.y + bounds.height : bounds.y + bounds.height / 2;
+        : mode === 'top' ? bounds.y : mode === 'bottom' ? bounds.y + bounds.height : bounds.centerY ?? bounds.y + bounds.height / 2;
     const moves = layers.map(layer => {
-        const distance = edge(anchor) - edge(layerBounds(project, layer));
+        const distance = edge(anchor) - edge(layerAlignmentBounds(project, layer));
         if (distance !== 0 && !canTransform(layer)) throw new Error('Unlock the position of every layer that needs to move before aligning.');
-        return { id: layer.id, dx: horizontal ? Math.round(distance) : 0, dy: horizontal ? 0 : Math.round(distance), fractional: !Number.isInteger(distance) };
+        const exactTextCenter = mode === 'center-y' && layer.text;
+        return { id: layer.id, dx: horizontal ? Math.round(distance) : 0,
+            dy: horizontal ? 0 : exactTextCenter ? distance : Math.round(distance),
+            fractional: !exactTextCenter && !Number.isInteger(distance) };
     });
     return { moves, needsApproval: moves.some(move => move.fractional) };
 }
@@ -101,6 +110,24 @@ export function selectedPixels(project) {
         (ids.has(layer.id) || layerAncestors(project, layer).some(parent => ids.has(parent.id))));
 }
 
+export function invertSelectedLayers(project) {
+    const layers = selectedPixels(project);
+    if (!layers.length) throw new Error('Select at least one pixel or text layer.');
+    if (layers.some(layer => layer.locks.all || layer.locks.color)) throw new Error('Unlock selected layer colors before inverting.');
+    const invert = color => color === null ? null : '#' + [1, 3, 5]
+        .map(at => (255 - parseInt(color.slice(at, at + 2), 16)).toString(16).padStart(2, '0')).join('');
+    let changed = false;
+    for (const layer of layers) {
+        layer.cells = layer.cells.map(color => { if (color !== null) changed = true; return invert(color); });
+        if (layer.offCanvas) layer.offCanvas = layer.offCanvas.map(([x, y, color]) => [x, y, invert(color)]);
+        if (layer.offCanvas?.length) changed = true;
+        if (layer.text) { layer.text = { ...layer.text, color: invert(layer.text.color) }; changed = true; }
+        if (layer.asset) { layer.asset = { ...layer.asset, color: invert(layer.asset.color) }; changed = true; }
+    }
+    bindLayer(project);
+    return changed;
+}
+
 export function editLayerSelection(project, action, drop = {}) {
     const roots = selectedLayers(project, true);
     if (!roots.length) throw new Error('Select at least one layer or folder.');
@@ -126,6 +153,7 @@ export function editLayerSelection(project, action, drop = {}) {
                 if (layer.type === 'layer') {
                     copy.cells = layer.cells.slice(); copy.offCanvas = structuredClone(layer.offCanvas || []); copy.locks = { ...layer.locks };
                     if (layer.text) copy.text = structuredClone(layer.text);
+                    if (layer.asset) copy.asset = structuredClone(layer.asset);
                 }
                 work.layers.push(copy);
                 return copy;
@@ -288,7 +316,8 @@ export function layerDropAction(project, id, action) {
     const name = source.name.slice(0, 80 - suffix.length) + suffix;
     const entry = action === 'copy'
         ? { ...source, id: crypto.randomUUID(), name, cells: source.cells.slice(), offCanvas: structuredClone(source.offCanvas || []), locks: { ...source.locks },
-            ...(source.text ? { text: structuredClone(source.text) } : {}) }
+            ...(source.text ? { text: structuredClone(source.text) } : {}),
+            ...(source.asset ? { asset: structuredClone(source.asset) } : {}) }
         : { id: crypto.randomUUID(), type: 'folder', name, parentId: source.parentId, visible: true, expanded: true };
     ordered.splice(index, 0, entry);
     if (action === 'folder') source.parentId = entry.id;
@@ -393,7 +422,7 @@ export function serializeLayers(project) {
 }
 
 export function canWrite(layer, oldColor) {
-    if (!layer || layer.type !== 'layer' || layer.text || layer.locks.all) return false;
+    if (!layer || layer.type !== 'layer' || layer.text || layer.asset || layer.locks.all) return false;
     if (layer.locks.transparency && oldColor === null) return false;
     if (layer.locks.color && oldColor !== null) return false;
     return true;
@@ -409,7 +438,13 @@ export function canTransform(layer) {
     return Boolean(layer?.type === 'layer' && !layer.locks.all && !layer.locks.position);
 }
 
+export function layerAlignmentBounds(project, layer) {
+    const bounds = layerBounds(project, layer);
+    return layer.text ? { ...bounds, centerY: textCenter(layer.text).y } : bounds;
+}
+
 export function layerBounds(project, layer) {
+    if (layer.asset) return vectorBounds(layer.asset);
     if (layer.text) return textBounds(layer.text);
     let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
     for (const [x, y] of layerPixels(project, layer)) {
@@ -426,6 +461,12 @@ export function transformLayers(project, transform, cols, rows, mapPoint = (x, y
     }
     const layers = project.layers.map(layer => {
         if (layer.type !== 'layer') return layer;
+        if (layer.asset) {
+            const origin = mapPoint(0, 0), x = mapPoint(1, 0), y = mapPoint(0, 1);
+            const a = x[0] - origin[0], b = x[1] - origin[1], c = y[0] - origin[0], d = y[1] - origin[1];
+            const asset = transformAsset(layer.asset, textMatrix || [a, b, c, d, origin[0] + 0.5 - (a + c) / 2, origin[1] + 0.5 - (b + d) / 2]);
+            return { ...layer, asset, ...layerRaster({ cols, rows }, rasterAsset(asset)) };
+        }
         if (layer.text) {
             const origin = mapPoint(0, 0), x = mapPoint(1, 0), y = mapPoint(0, 1);
             const a = x[0] - origin[0], b = x[1] - origin[1], c = y[0] - origin[0], d = y[1] - origin[1];
@@ -457,12 +498,16 @@ export function validateLayers(data) {
             !(layer.parentId === null || typeof layer.parentId === 'string')) invalid();
         ids.add(layer.id);
         if (layer.type === 'folder') {
-            if (layer.text !== undefined) invalid();
+            if (layer.text !== undefined || layer.asset !== undefined) invalid();
             if (typeof layer.expanded !== 'boolean') invalid();
             continue;
         }
         count++;
         if (layer.text !== undefined) validateText(layer.text);
+        if (layer.asset !== undefined) {
+            if (layer.text !== undefined) invalid();
+            validateAsset(layer.asset);
+        }
         if (layer.offCanvas !== undefined) {
             if (!Array.isArray(layer.offCanvas) || layer.offCanvas.length > MAX_LAYER_CELLS) invalid();
             const positions = new Set();

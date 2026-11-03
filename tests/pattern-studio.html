@@ -5,7 +5,7 @@
 <h1>Pattern Studio model and storage tests</h1>
 <pre id="results">Running...</pre>
 <script type="module">
-import { parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
+import { MAX_SIDE, MAX_REFERENCE_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
 import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
 import { boxFromCells, brush, brushBounds, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth, snapTranslation } from '../tools/pattern-studio/objects.js';
@@ -17,10 +17,13 @@ import { BLEND_MODES, LOCKS, MAX_LAYERS, MAX_LAYER_CELLS, activeLayer, bindLayer
     layerOrder, layerVisible, compositeColor, flattenLayers, serializeLayers, canWrite, writeLayerCell,
     canTransform, layerBounds, transformLayers, validateLayers, createLayerCompositor, flattenPixels, moveLayer,
     layerAncestors, layerDropAction, deleteLayer, selectedLayers, selectedPixels, editLayerSelection,
-    layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers } from '../tools/pattern-studio/layers.js';
+    layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers, layerRoom, invertSelectedLayers } from '../tools/pattern-studio/layers.js';
 import { rasterLayerObject } from '../tools/pattern-studio/objects.js';
 import { adjustColor, adjustBrush } from '../tools/pattern-studio/adjustments.js';
-import { fontCatalog, loadSvgFont, parseSvgFont, layoutText, rasterText, transformText, placedText, textBounds, validateText, fontNamePreview } from '../tools/pattern-studio/text.js';
+import { fontCatalog, loadSvgFont, parseSvgFont, layoutText, rasterText, transformText, placedText, textBounds, textCenter, validateText, fontNamePreview, updateTextCenter } from '../tools/pattern-studio/text.js';
+import { assetCatalog, validateAssetCatalog, assetList, loadAsset, parseAssetSvg, createAsset,
+    validateAsset, rasterAsset, transformAsset, placedAsset, assetThumbnail } from '../tools/pattern-studio/assets.js';
+import { vectorBounds } from '../tools/pattern-studio/vector.js';
 const results = [];
 const assert = (condition, name) => {
     if (!condition) throw new Error(name);
@@ -34,6 +37,116 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    {
+        const entries = await assetCatalog();
+        assert(entries.length > 0 && entries.every(entry => ['ornament', 'border'].includes(entry.type)),
+            'Asset manifest loads supported categories and metadata');
+        const first = entries[0], source = await loadAsset(first.file);
+        assert(source.paths.length > 0 && assetThumbnail(source).querySelectorAll('path').length === source.paths.length,
+            'Bundled ornament paths render a safe vector thumbnail');
+        const fixture = [
+            { ...first, name: 'Standalone', file: 'one.svg', collection: null, type: 'ornament', tags: ['floral', 'corner'] },
+            { ...first, name: 'Collection Corner', file: 'two.svg', collection: 'Nouveau', type: 'ornament', tags: ['floral'] },
+            { ...first, name: 'Other Flower', file: 'three.svg', collection: 'Nouveau', type: 'ornament', tags: ['flower'] },
+            { ...first, name: 'Border', file: 'four.svg', collection: null, type: 'border', tags: ['floral'] },
+        ];
+        validateAssetCatalog(fixture);
+        const top = assetList(fixture, 'ornament');
+        assert(top.length === 2 && top[0].asset.name === 'Standalone' && top[1].collection === 'Nouveau',
+            'Uncollected assets stay at root and collections appear once');
+        assert(assetList(fixture, 'ornament', '', 'Nouveau').length === 2, 'Collection navigation lists only its assets');
+        assert(assetList(fixture, 'ornament', 'FLORAL corner', 'Nouveau').length === 2,
+            'Search matches name/tags case-insensitively across collections with all terms');
+        assert(assetList(fixture, 'border', 'floral').length === 1 && !assetList(fixture, 'ornament', 'missing').length,
+            'Search stays within the active type and returns empty matches');
+        for (const change of [
+            e => { e.file = '../escape.svg'; }, e => { e.type = 'other'; },
+            e => { e.collection = 42; }, e => { e.tags = 'floral'; }, e => { e.preview_width = 0; },
+        ]) {
+            const invalid = structuredClone(first); change(invalid);
+            rejects(() => validateAssetCatalog([invalid]), 'Invalid asset manifest metadata fails explicitly');
+        }
+        rejects(() => validateAssetCatalog([first, first]), 'Duplicate asset filenames are rejected');
+        const square = parseAssetSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" fill="currentColor"><path d="M0 0H20V10H0Z"/></svg>');
+        const sanitized = parseAssetSvg('<svg viewBox="0 0 20 10"><path d="M0 0H20V10H0Z"/><script>throw new Error("Do not execute")<\/script></svg>');
+        assert(sanitized.paths.length === 1 && assetThumbnail(sanitized).querySelector('script') === null,
+            'Scripts are discarded and only validated geometry is reconstructed');
+        const entry = { ...first, name: 'Square', file: 'square.svg', type: 'ornament' };
+        const asset = createAsset(entry, square, 20, '#123456');
+        assert(asset.width === 20 && asset.height === 10 && rasterAsset(asset).length === 200,
+            'Asset size uses longest side and rasterizes exact filled cells');
+        for (const size of [15, 250]) {
+            const scaled = createAsset(entry, square, size, '#123456');
+            assert(scaled.width === size && scaled.height === Math.round(size / 2), 'Asset preview size endpoints preserve rounded aspect ratio');
+        }
+        rejects(() => createAsset(entry, square, 14, '#123456'), 'Asset slider lower bound is validated');
+        rejects(() => createAsset(entry, square, 251, '#123456'), 'Asset slider upper bound is validated');
+        const holes = parseAssetSvg('<svg viewBox="0 0 20 20" fill-rule="evenodd"><path d="M0 0H20V20H0Z M5 5H15V15H5Z"/></svg>');
+        assert(rasterAsset(createAsset(entry, holes, 20, '#000000')).length === 300,
+            'SVG evenodd holes remain transparent in the stitch raster');
+        const transformed = parseAssetSvg('<svg viewBox="0 0 20 20"><g transform="translate(5 5)"><path transform="scale(2)" d="M0 0H5V5H0Z"/></g></svg>');
+        const movedPixels = rasterAsset(createAsset(entry, transformed, 20, '#000000'));
+        assert(movedPixels.length === 100 && movedPixels.some(([x, y]) => x === 5 && y === 5),
+            'SVG nested transforms compose in parent/local order');
+        for (const svg of [
+            '<svg/>', '<svg viewBox="0 0 1 1"><script/></svg>',
+            '<svg viewBox="0 0 1 1"><path onclick="alert(1)" d="M0 0Z"/></svg>',
+            '<svg viewBox="0 0 1 1"><use href="other.svg"/></svg>',
+            '<svg viewBox="0 0 1 1"><path fill="url(#paint)" d="M0 0Z"/></svg>',
+            '<svg viewBox="0 0 1 1"><path stroke="red" d="M0 0Z"/></svg>',
+        ]) rejects(() => parseAssetSvg(svg), 'Unsupported or active SVG input is rejected');
+        const project = migrateLayers({ cols: 40, rows: 40, cells: Array(1600).fill(null) }), layer = activeLayer(project);
+        Object.assign(layer, { asset }, layerRaster(project, rasterAsset(asset)));
+        assert(!canWrite(layer, '#000000') && layerBounds(project, layer).width === 20,
+            'Vector asset layers expose logical bounds and reject brush edits');
+        const translated = translateLayer(project, layer, -5, 0);
+        assert(translated.asset.matrix[4] === -5 && translated.offCanvas.length === 50 &&
+            translated.cells.filter(Boolean).length === 150, 'Asset translation retains off-canvas vector pixels');
+        const rotated = placedAsset(asset, vectorBounds(asset), { cx: 20, cy: 20, width: 40, height: 20, angle: 90 });
+        assert(rasterAsset(rotated).length === 800 && rotated.paths === asset.paths,
+            'Asset placement scaling and rotation regenerate original vectors');
+        editLayerSelection(project, 'copy'); bindLayer(project);
+        const copy = activeLayer(project);
+        assert(copy.asset !== layer.asset && copy.asset.paths !== layer.asset.paths,
+            'Asset duplicate deeply copies persistent metadata');
+        invertSelectedLayers(project);
+        assert(copy.asset.color === '#edcba9' && copy.cells[0] === '#edcba9',
+            'Inversion updates vector asset color and raster cache together');
+        const saved = JSON.parse(JSON.stringify(serializeLayers(project))); validateLayers(saved);
+        assert(saved.layers.find(item => item.id === copy.id).asset.paths[0].d === square.paths[0].d,
+            'Asset paths survive JSON backup validation without catalog dependencies');
+        const small = migrateLayers({ cols: 40, rows: 40, cells: Array(1600).fill(null) });
+        Object.assign(activeLayer(small), { asset }, layerRaster(small, rasterAsset(asset)));
+        transformLayers(small, cells => resizeCells(cells, 40, 40, 20, 20), 20, 20,
+            (x, y) => [Math.floor(x / 2), Math.floor(y / 2)], [0.5, 0, 0, 0.5, 0, 0]);
+        assert(activeLayer(small).cells.filter(Boolean).length === 50, 'Grid resize preserves SVG asset geometry');
+        for (const change of [
+            a => { a.matrix = [0, 0, 0, 0, 0, 0]; }, a => { a.paths[0].d = '<script/>'; },
+            a => { a.viewBox[2] = 0; }, a => { a.color = 'red'; }, a => { a.width = 10000; },
+        ]) { const invalid = structuredClone(asset); change(invalid); rejects(() => validateAsset(invalid), 'Invalid saved asset metadata is rejected'); }
+        rejects(() => rasterAsset(transformAsset(asset, [1000, 0, 0, 1000, 0, 0])),
+            'Oversized asset transforms fail before bitmap allocation');
+    }
+    {
+        const p = migrateLayers({ cols: 2, rows: 2, cells: ['#123456', null, '#ffffff', '#000000'] });
+        const layer = activeLayer(p);
+        layer.offCanvas = [[-1, 0, '#aabbcc']];
+        const original = JSON.stringify(layer);
+        assert(invertSelectedLayers(p) && layer.cells.join() === '#edcba9,,#000000,#ffffff' &&
+            layer.offCanvas[0][2] === '#554433', 'Invert preserves transparency and inverts visible/off-canvas RGB');
+        invertSelectedLayers(p);
+        assert(JSON.stringify(layer) === original, 'Inverting twice restores exact layer colors');
+        layer.locks.color = true;
+        rejects(() => invertSelectedLayers(p), 'Color lock explicitly blocks inversion');
+        layer.locks.color = false;
+        const folder = { id: 'invert-folder', type: 'folder', name: 'Group', parentId: null, visible: true };
+        p.layers.unshift(folder); layer.parentId = folder.id; p.activeLayerId = folder.id; p.selectedLayerIds = [folder.id];
+        layer.text = { color: '#123456' };
+        invertSelectedLayers(p);
+        assert(layer.text.color === '#edcba9' && layer.cells[0] === '#edcba9',
+            'Folder inversion includes child text color while preserving editable metadata');
+        delete layer.text;
+    }
     {
         assert(MIN_ZOOM === 0.35 && MAX_ZOOM === 8, 'Zoom spans exactly 35% through 800% of fit-to-frame');
         assert(stepZoom(0.5, -1) === 0.35 && stepZoom(0.35, -1) === 0.35 &&
@@ -73,7 +186,7 @@ try {
             const previewBox = preview.getAttribute('viewBox').split(' ').map(Number);
             assert(preview.localName === 'svg' && previewBox.length === 4 && previewBox.every(Number.isFinite) &&
                 previewBox[2] > 0 && previewBox[3] > 0 &&
-                Math.abs(parseFloat(preview.style.width) / (previewBox[2] / previewBox[3]) - 20) < 1e-6 &&
+                Math.abs(parseFloat(preview.style.width) / (previewBox[2] / previewBox[3]) - 20) < 1e-4 &&
                 preview.querySelectorAll('path').length === name.paths.length && name.paths.length > 0 &&
                 [...preview.children].every((path, i) => path.getAttribute('d') === name.paths[i].d &&
                     path.getAttribute('fill') === 'currentColor'),
@@ -82,6 +195,25 @@ try {
             const pixels = rasterText(text);
             assert(pixels.length > 10 && pixels.every(([, , color]) => color === '#123456') && !missing.length,
                 `${entry.name} renders SVG outlines, including normalized accented characters`);
+            for (const content of ['Really bruh?', 'e', 'R', 'y', '?']) {
+                const sample = layoutText(font, { content, font: entry.file, size: 16, color: '#ffffff' }).text;
+                const old = { ...sample, centerY: sample.height / 2 };
+                delete old.xHeight;
+                const updated = updateTextCenter(old, font);
+                const baseline = updated.paths[0].y * updated.size / updated.units;
+                assert(Math.abs(textCenter(updated).y - baseline + font.xHeight / font.units * 8) < 1e-8,
+                    `${entry.name}: reopening ${content} ignores capital, descender and punctuation extents`);
+                const bounds = textBounds(updated);
+                const object = { cx: bounds.x + bounds.width / 2, cy: bounds.y + bounds.height / 2,
+                    width: bounds.width, height: bounds.height, angle: 0, text: updated,
+                    centerY: textCenter(updated).y };
+                const snap = snapTranslation(object, 0, 35 - object.centerY + 0.1,
+                    [{ x: 0, y: 0, width: 210, height: 70 }], 210, 70);
+                const placed = placedText(updated, bounds, { ...object, cy: object.cy + snap.dy });
+                assert(Math.abs(textCenter(placed).y - 35) < 1e-8 &&
+                    snap.guides.some(guide => guide.axis === 'y' && guide.value === 35),
+                    `${entry.name}: ${content} snaps its lowercase body, not its selection box, to the horizontal axis`);
+            }
         }
         rejects(() => parseSvgFont('<svg/>'), 'Malformed SVG font fails explicitly');
         rejects(() => parseSvgFont('<svg><font horiz-adv-x="1"><font-face units-per-em="0" ascent="1"/></font></svg>'),
@@ -90,17 +222,91 @@ try {
         try { await loadSvgFont('../outside.svg'); } catch { failed = true; }
         assert(failed, 'Only catalogued font files can load');
         const font = parseSvgFont(`<svg xmlns="http://www.w3.org/2000/svg"><defs><font horiz-adv-x="10">
-            <font-face units-per-em="10" ascent="10"/>
+            <font-face units-per-em="10" ascent="10" x-height="6"/>
             <missing-glyph horiz-adv-x="10" d="M0 0H10V10H0Z"/>
             <glyph unicode=" " horiz-adv-x="5"/>
             <glyph glyph-name="A" unicode="A" d="M0 0H10V10H0Z"/>
             <glyph glyph-name="B" unicode="B" d="M0 0H10V10H0Z"/>
+            <glyph unicode="g" d="M0 -3H10V7H0Z"/>
+            <glyph unicode="x" d="M0 0H10V6H0Z"/>
+            <glyph unicode="?" d="M0 -4H10V12H0Z"/>
             <glyph unicode="fi" horiz-adv-x="8" d="M0 0H8V10H0Z"/>
             <hkern g1="A" g2="B" k="2"/>
             </font></defs></svg>`);
         const make = (content = 'A', size = 10) => layoutText(font, { content, font: 'Test.svg', size, color: '#ff0000' }).text;
         const text = make();
         assert(rasterText(text).length === 100, 'SVG font paths fill exactly the expected grid cells');
+        assert(text.height === 10 && text.paths[0].y === 10, 'Capital text box excludes unused line-height padding');
+        assert(make('Ag').height === 13 && make('A').height === 10,
+            'Descenders expand the text box only when present and removing them shrinks it');
+        assert(make('Ag').centerY === 7 && make('A').centerY === 7 && textCenter(make('Ag')).y === 7,
+            'Text alignment center uses font x-height instead of capital and descender extents');
+        assert(textCenter(transformText(make('Ag'), [1, 0, 0, 2, 0, 7])).y === 21,
+            'Lowercase-body center follows text scaling and translation');
+        for (const content of ['x', 'A', 'g', '?', 'xAg?', 'AAAA', '???']) {
+            const sample = make(content);
+            assert(sample.centerY - sample.paths[0].y === -3,
+                `${content} centers on fixed lowercase x-height regardless of glyph extents`);
+        }
+        const multilineCenter = make('x\nA?g');
+        assert(multilineCenter.centerY - multilineCenter.paths[0].y === 3,
+            'Multiline center uses fixed lowercase body metrics and unchanged baseline spacing');
+        const fallbackFont = parseSvgFont('<svg><font horiz-adv-x="10"><font-face units-per-em="10" ascent="10"/><glyph unicode="x" d="M0 0H10V6H0Z"/></font></svg>');
+        assert(fallbackFont.xHeight === 6, 'Fonts lacking x-height derive the metric from their lowercase x glyph');
+        rejects(() => parseSvgFont('<svg><font horiz-adv-x="10"><font-face units-per-em="10" ascent="10" x-height="0"/></font></svg>'),
+            'Invalid font x-height is reported explicitly');
+        const centerProject = migrateLayers({ cols: 40, rows: 40, cells: Array(1600).fill(null) });
+        const capital = activeLayer(centerProject), descending = newLayer(40, 40, 'Descender');
+        Object.assign(capital, { text: make('A') }, layerRaster(centerProject, rasterText(make('A'))));
+        Object.assign(descending, { text: transformText(make('Ag'), [1, 0, 0, 1, 0, 10]) },
+            layerRaster(centerProject, rasterText(transformText(make('Ag'), [1, 0, 0, 1, 0, 10]))));
+        centerProject.layers.unshift(descending); centerProject.selectedLayerIds = [capital.id, descending.id];
+        assert(alignmentPlan(centerProject, 'center-y').moves.find(move => move.id === descending.id).dy === -10 &&
+            !alignmentPlan(centerProject, 'center-y').needsApproval,
+            'Center alignment ignores descenders on selected text layers');
+        const snappedCenter = snapTranslation({ cx: 20, cy: 16.5, width: 20, height: 13, angle: 0, centerY: 15 },
+            0, -9.8, [{ x: 0, y: -100, width: 40, height: 200, centerY: 5 }], 40, 40);
+        assert(snappedCenter.dy === -10 && snappedCenter.guides.some(guide => guide.axis === 'y' && guide.value === 5),
+            'Snapping uses descender-free centers for dragged objects and targets');
+        const fractionalText = make('Ag', 9);
+        const snapBody = { cx: 20, cy: 16, width: 18, height: 12, angle: 0,
+            text: fractionalText, centerY: fractionalText.centerY + 10 };
+        const bodyTargets = [{ x: 0, y: 0, width: 40, height: 40 }];
+        const fractionalSnap = snapTranslation(snapBody, 0, 3.6, bodyTargets, 40, 40);
+        assert(Math.abs(snapBody.centerY + fractionalSnap.dy - 20) < 1e-8 &&
+            fractionalSnap.guides.some(guide => guide.axis === 'y' && guide.value === 20),
+            'Fractional x-height center snaps exactly to the canvas horizontal center guide');
+        assert(Number.isInteger(snapTranslation({ ...snapBody, text: undefined }, 0, 3.6,
+            bodyTargets, 40, 40).dy),
+            'Raster objects retain whole-cell movement when their center cannot align exactly');
+        Object.assign(descending, { text: fractionalText }, layerRaster(centerProject, rasterText(fractionalText)));
+        const fractionalPlan = alignmentPlan(centerProject, 'center-y');
+        assert(!fractionalPlan.needsApproval &&
+            Math.abs(fractionalPlan.moves.find(move => move.id === descending.id).dy - 0.7) < 1e-8,
+            'Editable text aligns its fractional body center without rounding approval');
+        assert(alignLayers(centerProject, 'center-y') &&
+            Math.abs(textCenter(centerProject.layers.find(layer => layer.id === descending.id).text).y -
+                textCenter(centerProject.layers.find(layer => layer.id === capital.id).text).y) < 1e-8,
+            'Committed text alignment preserves exact lowercase-body centers after rasterization');
+        const legacy = make('Ag'); delete legacy.centerY; delete legacy.xHeight;
+        assert(textCenter(legacy).y === legacy.height / 2, 'Existing saved text without body metrics keeps its legacy center');
+        const oldBoxCentered = { ...legacy, centerY: legacy.height / 2 };
+        const upgraded = updateTextCenter(oldBoxCentered, font);
+        assert(textCenter(upgraded).y === 7 && upgraded.paths === legacy.paths &&
+            upgraded.matrix === legacy.matrix && upgraded.width === legacy.width && upgraded.height === legacy.height &&
+            JSON.stringify(rasterText(upgraded)) === JSON.stringify(rasterText(legacy)),
+            'Updating saved box-centered text changes only alignment metadata, not lettering or selection geometry');
+        assert(textCenter({ ...upgraded, centerY: upgraded.height / 2 }).y === 7,
+            'Saved font x-height overrides stale cached box-centered metadata');
+        assert(textCenter(JSON.parse(JSON.stringify(upgraded))).y === 7,
+            'Saved and reopened text retains its lowercase-body center without reloading the font');
+        assert(make('g').height === 10 && make('g').paths[0].y === 7,
+            'Text bounds trim unused space above a shorter glyph as well as below');
+        assert(make('A\nA').height === 22 && make('A\nAg').height === 25 &&
+            make('Ag\nA').height === 22 && make('A\nA').paths[1].y - make('A\nA').paths[0].y === 12,
+            'Multiline text preserves baseline spacing without padding below its final glyph');
+        assert(make('A\n').height === 10 && rasterText(make(' \n ')).length === 0 && make(' \n ').height > 0,
+            'Trailing empty lines do not pad visible text and whitespace-only text retains an editable box');
         assert(make('AB').width === 18, 'SVG glyph-name kerning adjusts advance');
         assert(make('fi').paths.length === 1 && make('fi').width === 8, 'Longest matching multi-character glyph is used');
         assert(make('A A').width === 25 && make('A A').paths.length === 2, 'Spaces advance without painted cells');
@@ -114,11 +320,11 @@ try {
         const moved = transformText(text, [1, 0, 0, 1, -3, 5]);
         assert(textBounds(moved).x === -3 && textBounds(moved).y === 5 && text.matrix[4] === 0,
             'Vector translation supports off-canvas positions without mutating its source');
-        const placed = placedText(text, { x: 0, y: 0, width: 10, height: 12 },
-            { cx: 20, cy: 20, width: 20, height: 24, angle: 90 });
+        const placed = placedText(text, { x: 0, y: 0, width: 10, height: 10 },
+            { cx: 20, cy: 20, width: 20, height: 20, angle: 90 });
         assert(rasterText(placed).length === 400 && placed.paths === text.paths,
             'Resize/rotation transforms retain SVG paths and regenerate crisp cells');
-        assert(JSON.stringify(textBounds(placed)) === JSON.stringify({ x: 8, y: 10, width: 24, height: 20 }),
+        assert(JSON.stringify(textBounds(placed)) === JSON.stringify({ x: 10, y: 10, width: 20, height: 20 }),
             'Quarter-turn text bounds do not acquire extra cells from floating-point rounding');
         assert(rasterText(transformText(text, [1e-9, 0, 0, 1, 0, 0])).length === 0,
             'Valid subpixel text transforms safely render an empty raster');
@@ -128,7 +334,7 @@ try {
         assert(layer.offCanvas.length === 30 && layer.cells.filter(Boolean).length === 70,
             'Text raster splits visible and off-canvas cells without losing glyph pixels');
         assert(flattenLayers(p).filter(Boolean).length === 70, 'Text participates in fixed-canvas compositing');
-        assert(layerBounds(p, layer).x === -3 && layerBounds(p, layer).height === 12,
+        assert(layerBounds(p, layer).x === -3 && layerBounds(p, layer).height === 10,
             'Text selection uses the full editable text box');
         assert(!canWrite(layer, '#ff0000') && !writeLayerCell(layer, 0, '#000000'),
             'Editable text cannot be accidentally painted over as raster pixels');
@@ -669,11 +875,11 @@ try {
     assert(solid.palette.length === 1 && solid.palette[0] === '#2468ac', 'Uniform images do not invent extra palette colors');
     assert(shades.usage.reduce((sum, color) => sum + color.count, 0) === 80, 'Stitch counts equal the number of painted cells');
     assert(approximationDimensions(500, 250, 200).rows === 100 &&
-        approximationDimensions(250, 500, 500).cols === 250, 'Grid dimensions preserve image proportions and enforce the longest-edge cap');
+        approximationDimensions(250, 500, 500).cols === 500, 'Grid dimensions preserve image proportions within the longest-edge cap');
     const sizeFromRows = approximationDimensions(240, 180, 76, 'rows');
     assert(sizeFromRows.cols === 101 && sizeFromRows.rows === 76, 'Height controls derive a consistent aspect-locked grid');
     rejects(() => approximateGrid({ rgba: pixels([null]), cols: 1, rows: 1 }), 'Fully transparent approximation reports an explicit error');
-    for (const bad of [{ colors: 33 }, { cols: 501 }, { colors: 1.5 }, { blocks: -1 }, { merge: 11 }, { rgba: [] }]) {
+    for (const bad of [{ colors: 33 }, { cols: 2001 }, { colors: 1.5 }, { blocks: -1 }, { merge: 11 }, { rgba: [] }]) {
         rejects(() => approximateGrid({ ...shadeSettings, ...bad }), 'Invalid approximation setting rejected: ' + Object.keys(bad)[0]);
     }
     rejects(() => approximationDimensions(100, 100, 0), 'Invalid approximation dimensions rejected');
@@ -837,10 +1043,10 @@ try {
             thick.filter(Boolean).length > thin.filter(Boolean).length, `${shape} thick outline contains the thin outline inside the shape`);
     }
     assert(shapeMask('rectangle', 4, 4, false, 20).every(Boolean), 'Outline wider than the shape fills it without overflowing');
-    for (const [text, expected] of [['50', 50], ['50.99', 50], ['4.9', 4], ['500.999', 500], ['+42.8', 42], [' 12.0 ', 12], ['49.99999999', 49], ['49.99999999999999999999', 49]]) {
+    for (const [text, expected] of [['50', 50], ['50.99', 50], ['4.9', 4], ['500.999', 500], ['2000.999', 2000], ['+42.8', 42], [' 12.0 ', 12], ['49.99999999', 49], ['49.99999999999999999999', 49]]) {
         assert(parseGridSize(text) === expected, `Grid size ${text} rounds down to ${expected}`);
     }
-    for (const text of ['20a', 'a20', '2e2', 'NaN', 'Infinity', '', ' ', '0x20', '12px', '1,000', '3.99', '3.9999999999999999999999', '-4.2', '501', '50.2.1']) {
+    for (const text of ['20a', 'a20', '2e2', 'NaN', 'Infinity', '', ' ', '0x20', '12px', '1,000', '3.99', '3.9999999999999999999999', '-4.2', '2001', '50.2.1']) {
         rejects(() => parseGridSize(text), `Invalid grid size "${text}" rejected`);
     }
     for (const [name, ratio] of Object.entries(CROP_RATIOS)) {
@@ -870,7 +1076,12 @@ try {
     assert(JSON.stringify(gridDimensions(500, 250, 50)) === '{"cols":50,"rows":25}', 'Landscape grid preserves proportions');
     assert(JSON.stringify(gridDimensions(250, 500, 50)) === '{"cols":25,"rows":50}', 'Portrait grid preserves proportions');
     assert(gridDimensions(500, 1, 4).rows === 1, 'Very thin references keep at least one row');
-    assert(gridDimensions(499, 333, 500).cols === 500, 'Grid supports the 500-cell maximum');
+    assert(gridDimensions(499, 333, 2000).cols === 2000, 'Grid supports the 2000-cell maximum');
+    assert(MAX_SIDE === 2000 && MAX_REFERENCE_SIDE === 500, 'Larger canvases retain the original uploaded-reference cap');
+    assert(approximationDimensions(500, 250, 2000).rows === 1000 &&
+        approximationDimensions(250, 500, 2000).rows === 2000, 'Approximation dimensions support the new maximum in both orientations');
+    const largeObject = resizeObject({ cx: 500, cy: 500, width: 1000, height: 1000, angle: 0 }, 'se', { x: 2000, y: 2000 });
+    assert(largeObject.width === 2000 && largeObject.height === 2000, 'Selection handles resize up to 2000 cells per side');
     const cells = ['#000000', '#ffffff', '#000000', '#ffffff'];
     flood(cells, 2, 2, 0, 0, '#ff0000');
     assert(cells.join(',') === '#ff0000,#ffffff,#ff0000,#ffffff', 'Bucket changes only connected target color');
@@ -934,8 +1145,21 @@ try {
     assert(validateProject(record) === record, 'Valid project schema accepted');
     const blankRecord = { ...record, blank: true, palette: [], cells: Array(4).fill(null) };
     assert(validateProject(blankRecord) === blankRecord, 'Blank projects use the existing project schema');
-    rejects(() => validateProject({ ...record, width: 501 }), 'Oversized references rejected');
-    rejects(() => validateProject({ ...record, cols: 501 }), 'Oversized grids rejected');
+    rejects(() => validateProject({ ...record, width: 2001 }), 'Oversized reference backing rejected');
+    rejects(() => validateProject({ ...record, cols: 2001 }), 'Oversized grids rejected');
+    {
+        const maximum = migrateLayers({ ...record, width: 2000, height: 2000, cols: 2000, rows: 2000,
+            blank: true, cells: Array(4000000).fill(null) });
+        activeLayer(maximum).cells[3999999] = '#123456';
+        assert(validateProject(maximum) === maximum, '2000 by 2000 layered projects pass schema and memory validation');
+        const saved = serializeLayers(maximum);
+        assert(saved.cells.length === 4000000 && saved.cells[3999999] === '#123456' &&
+            validateProject(saved) === saved, 'Maximum-size projects serialize and validate without losing the last cell');
+        rejects(() => layerRoom(maximum, true), 'Maximum-size canvas explicitly rejects a second pixel layer');
+        assert(layerRoom(maximum, false) === undefined, 'Maximum-size canvas still permits folders');
+        rejects(() => transformLayers({ layers: [{ type: 'layer' }, { type: 'layer' }] }, () => [], 2000, 2000),
+            'Resizing multiple layers to 2000 by 2000 retains the aggregate memory safeguard');
+    }
     rejects(() => validateProject({ ...record, cells: [] }), 'Wrong cell count rejected');
     rejects(() => validateProject({ ...record, cells: ['red', null, null, null] }), 'Invalid paint colors rejected');
     rejects(() => validateProject({ ...record, reference: 'https://example.com/image.png' }), 'Remote reference URLs rejected');

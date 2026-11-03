@@ -1,3 +1,5 @@
+import { transformMatrix, vectorBounds, placementMatrix } from './vector.js';
+
 const MAX_TEXT = 1000;
 const MAX_PATH_DATA = 1000000;
 const fonts = new Map();
@@ -52,7 +54,11 @@ export function parseSvgFont(source) {
             for (const left of resolve(1)) for (const right of resolve(2)) pairs.set(`${left}\0${right}`, value);
         }
         const missing = font.querySelector('missing-glyph');
-        return { units, ascent, glyphs, pairs, missing: missing ? read(missing) : null,
+        const xBounds = glyphs.get('x')?.bounds;
+        const xHeight = face.hasAttribute('x-height') ? Number(face.getAttribute('x-height')) :
+            xBounds ? xBounds.y + xBounds.height : null;
+        if (!Number.isFinite(xHeight) || xHeight <= 0) throw new Error('SVG font needs a positive x-height metric or an x glyph.');
+        return { units, ascent, xHeight, glyphs, pairs, missing: missing ? read(missing) : null,
             keys: [...glyphs.keys()].filter(Boolean).sort((a, b) => b.length - a.length) };
     } finally { svg.remove(); }
 }
@@ -71,12 +77,11 @@ export function layoutText(font, { content, font: file, size, color, matrix = [1
     if (typeof content !== 'string' || content.length > MAX_TEXT || !Number.isInteger(size) || size < 1 || size > 500 ||
         !/^#[0-9a-f]{6}$/i.test(color)) throw new Error('Text requires up to 1000 characters, a size from 1 to 500 cells, and a valid color.');
     const paths = [], missing = new Set(), scale = size / font.units;
-    let x = 0, y = font.ascent, left = 0, top = 0, right = 0, bottom = font.units * 1.2, previous = null;
+    let x = 0, y = font.ascent, left = 0, top = Infinity, right = 0, bottom = -Infinity, previous = null;
     const normalized = content.replace(/\r\n?/g, '\n').normalize('NFD');
     for (let i = 0; i < normalized.length;) {
         if (normalized[i] === '\n') {
             x = 0; y += font.units * 1.2; previous = null;
-            bottom = Math.max(bottom, y - font.ascent + font.units * 1.2);
             i++; continue;
         }
         const key = font.keys.find(value => normalized.startsWith(value, i)) || String.fromCodePoint(normalized.codePointAt(i));
@@ -96,11 +101,25 @@ export function layoutText(font, { content, font: file, size, color, matrix = [1
         previous = key;
         i += key.length;
     }
+    if (!paths.length) { top = 0; bottom = y - font.ascent + font.units * 1.2; }
     for (const path of paths) { path.x -= left; path.y -= top; }
     const text = { content, font: file, size, color: color.toLowerCase(), units: font.units, paths,
-        width: Math.max(1, Math.ceil((right - left) * scale)), height: Math.max(1, Math.ceil((bottom - top) * scale)), matrix: [...matrix] };
-    validateText(text);
-    return { text, missing: [...missing] };
+        width: Math.max(1, Math.ceil((right - left) * scale)), height: Math.max(1, Math.ceil((bottom - top) * scale)),
+        matrix: [...matrix] };
+    return { text: updateTextCenter(text, font), missing: [...missing] };
+}
+
+function bodyCenter(text) {
+    if (!text.paths.length) return text.height / 2;
+    const baselines = text.paths.map(path => path.y);
+    return (Math.min(...baselines) + Math.max(...baselines) - text.xHeight) / 2 * text.size / text.units;
+}
+
+export function updateTextCenter(text, font) {
+    const result = { ...text, xHeight: font.xHeight / font.units * text.units };
+    result.centerY = bodyCenter(result);
+    validateText(result);
+    return result;
 }
 
 export function fontNamePreview(font, entry) {
@@ -134,6 +153,8 @@ export function validateText(text) {
         typeof text.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(text.color) ||
         !finite(text.units) || text.units <= 0 ||
         !Number.isInteger(text.width) || !Number.isInteger(text.height) || text.width < 1 || text.height < 1 ||
+        (text.centerY !== undefined && !finite(text.centerY)) ||
+        (text.xHeight !== undefined && (!finite(text.xHeight) || text.xHeight <= 0)) ||
         text.width > 8192 || text.height > 8192 || text.width * text.height > 4000000 ||
         !Array.isArray(text.matrix) || text.matrix.length !== 6 || !text.matrix.every(finite) ||
         Math.abs(text.matrix[0] * text.matrix[3] - text.matrix[1] * text.matrix[2]) < 1e-10 ||
@@ -144,19 +165,19 @@ export function validateText(text) {
 }
 
 export function transformText(text, matrix) {
-    const [a, b, c, d, e, f] = matrix, [g, h, i, j, k, l] = text.matrix;
-    const result = { ...text, matrix: [a * g + c * h, b * g + d * h, a * i + c * j, b * i + d * j, a * k + c * l + e, b * k + d * l + f] };
+    const result = { ...text, matrix: transformMatrix(text.matrix, matrix) };
     validateText(result);
     return result;
 }
 
 export function textBounds(text) {
-    const [a, b, c, d, e, f] = text.matrix;
-    const corners = [[0, 0], [text.width, 0], [text.width, text.height], [0, text.height]]
-        .map(([x, y]) => ({ x: a * x + c * y + e, y: b * x + d * y + f }));
-    const x = Math.floor(Math.min(...corners.map(p => p.x)) + 1e-8), y = Math.floor(Math.min(...corners.map(p => p.y)) + 1e-8);
-    return { x, y, width: Math.max(1, Math.ceil(Math.max(...corners.map(p => p.x)) - 1e-8) - x),
-        height: Math.max(1, Math.ceil(Math.max(...corners.map(p => p.y)) - 1e-8) - y) };
+    return vectorBounds(text);
+}
+
+export function textCenter(text) {
+    const [a, b, c, d, e, f] = text.matrix, x = text.width / 2,
+        y = text.xHeight !== undefined ? bodyCenter(text) : text.centerY ?? text.height / 2;
+    return { x: a * x + c * y + e, y: b * x + d * y + f };
 }
 
 const vectorPaths = new WeakMap();
@@ -187,9 +208,5 @@ export function rasterText(text) {
 }
 
 export function placedText(text, original, object) {
-    const angle = object.angle * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle);
-    const a = cos * object.width / original.width, b = sin * object.width / original.width;
-    const c = -sin * object.height / original.height, d = cos * object.height / original.height;
-    const cx = original.x + original.width / 2, cy = original.y + original.height / 2;
-    return transformText(text, [a, b, c, d, object.cx - a * cx - c * cy, object.cy - b * cx - d * cy]);
+    return transformText(text, placementMatrix(original, object));
 }

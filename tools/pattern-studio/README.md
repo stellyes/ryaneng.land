@@ -1,5 +1,43 @@
 # Pattern Studio (local demo)
 
+- **Asset Library** opens a searchable SVG decoration catalog with Ornaments
+  and Borders tabs. Entries come from [the asset manifest](assets/ornaments/index.json):
+  `name`, `file`, `tags`, `type`, `collection`, `preview_width`, `preview_height`.
+  Preview dimensions are screen pixels. Non-null collections appear as folders;
+  opening one shows its assets with a beige Back row. Search matches name/tags
+  across all collections in the active tab (all search words must match).
+  - **Info** opens a second dialog with a pixel-grid preview. Color, Background,
+    and a 15-250-cell longest-side slider update it live. SVG viewBox proportions
+    are preserved, with grid dimensions rounded to cells. Background is preview-only.
+  - **Add to project** creates a separate SVG-backed layer at the canvas center.
+    Its original filled paths are saved with the project, so reopening does not
+    require the catalog file. Move, scale, rotate, snap, duplicate, align, and
+    invert work like text layers. Asset color and Rasterize to pixels are in
+    Tool options. Undo supports insertion, transforms, color edits, and rasterization.
+    Image exports contain only the final visible grid pixels.
+  - Pixel brushes and Cut cannot change scalable assets until rasterized; Copy
+    uses the pixel clipboard, while layer duplication retains editable vectors.
+    Existing locks, hierarchy, off-canvas retention and layer memory limits apply.
+    At 2000 x 2000 a second pixel/asset layer exceeds the current memory budget.
+  - This iteration supports monochrome filled SVG paths/groups, transforms and
+    even-odd holes. Strokes must be outlined; scripts are discarded without execution.
+    External resources, event handlers, masks, gradients and other unsupported SVG
+    elements are rejected explicitly.
+    Borders are catalogued separately but insert as single assets for now;
+    repetition/edge-layout behavior is deferred.
+
+- **Delete** removes selected layers/folders, including folder contents, in one
+  undoable action. Editable fields and dialogs keep their normal Delete behavior.
+  Locked layers and deletion of the last pixel/text layer remain protected.
+- **Ctrl/Cmd+I**, or **Invert colors** in the toolbar, inverts RGB colors on all
+  selected layers and folder contents, including off-canvas pixels. Transparency,
+  opacity and blend modes remain unchanged; text stays editable with an inverted
+  text color. Color/full locks block the whole action. Undo restores the colors.
+- With Paint, Eraser, Dodge, Burn or Sponge, **Shift-click** connects the previous
+  changed stroke's endpoint to the new point using the current brush size/settings.
+  The endpoint is reused only for the same tool, layer and project. The connecting
+  line and any continued drag form one undoable stroke.
+
 [Pattern Studio](index.html) is a dependency-free JavaScript
 pixel-art / tapestry crochet editor for tablet and desktop viewports (768px+).
 Serve the repository over HTTP (localhost) or HTTPS; no build or backend is needed.
@@ -9,7 +47,13 @@ gold text, forest-green texture, and dark panels. The right-hand dock contains
 tool options, layers, and a magnifier button for zoom controls.
 
 - Create new opens a dialog with Blank canvas and Reference image tabs: start
-  a blank canvas with 1-500 columns and rows, or upload a reference image.
+  a blank canvas with 1-2000 columns and rows, or upload a reference image.
+  The existing four-million-layer-cell memory budget remains: a 2000 x 2000
+  grid allows one pixel/text layer and no off-canvas pixels; smaller grids
+  allow more layers. Folders do not consume pixel-layer capacity.
+  JSON backup imports accept up to 96 MB to accommodate the larger grids.
+  Uploaded references remain limited to 500 pixels on their longest edge;
+  grid resolution is independent. Export images retain their 5000px-side limit.
   Use Left/Right arrows or Home/End to switch focused tabs.
   Blank projects need no image; internally a
   transparent backing keeps them compatible with existing backups and transforms.
@@ -18,7 +62,7 @@ tool options, layers, and a magnifier button for zoom controls.
   stay in the dialog until **Create editable pattern** is confirmed; cancelling
   does not change or save the open project.
   - The preview shows the reference and estimated pattern. Width and height
-    sliders/numbers preserve the image ratio, up to 500 cells on the longest
+    sliders/numbers preserve the image ratio, up to 2000 cells on the longest
     side, and show the total stitch count.
   - Maximum colors is a hard cap of 1-32, not a target: flat images and similar
     shades may need fewer colors. Fine-tuning includes blended-edge reduction, shade merging, minimum
@@ -53,6 +97,27 @@ tool options, layers, and a magnifier button for zoom controls.
   to close the picker.
   Text is limited to 1000 characters. New layers start with "Text",
   a size suited to the grid, and the selected palette color (or black).
+  Vertical bounds fit the actual glyphs (rounded up to whole cells).
+  Descenders expand the box only when present. Multiline baselines remain
+  1.2 em apart; trailing empty lines do not add selection padding. Empty or
+  whitespace-only text retains a usable box. Existing saved text keeps its
+  original layout until its content, font, size, or color is edited.
+  Horizontal center-alignment and snap guides use the font's fixed lowercase
+  x-height, halfway between the baseline and x-height line, rather than the
+  characters' combined bounds. Capitals, ascenders, punctuation and descenders
+  do not change this baseline-relative center. Multiline text centers the
+  lowercase-body span from its first to last painted line. The center
+  follows scaling/rotation. Fonts without an x-height
+  metric use their x glyph's height above the baseline.
+  Editable text can move by fractional cells to align or snap this center
+  exactly; its SVG is rerendered into whole stitch cells. Raster layers keep
+  their whole-cell movement restriction.
+  The selection box still encloses all lettering;
+  edge alignment and resize/rotation pivots remain unchanged. Existing projects
+  automatically update old text-center metadata when opened, without changing
+  glyph paths, raster pixels, selection bounds, or transforms. The font x-height
+  is saved with the layer; center calculations use it and the painted-line
+  baselines rather than an older cached selection-box center.
   - The bundled fonts are read directly as SVG fonts, not substituted with
     browser/system fonts. Glyph outlines, advances, multi-character glyphs,
     Unicode normalization, and explicit kerning pairs are used. Missing
@@ -82,7 +147,7 @@ tool options, layers, and a magnifier button for zoom controls.
   - Paint, erase, adjustment brushes and pixel pastes cannot modify editable
     text. **Rasterize to pixels** explicitly converts it to a normal layer;
     Undo restores text editability. Copy produces a normal pixel clipboard
-    image; Cut/Delete do not erase editable text (delete the layer instead).
+    image; Cut does not erase editable text. Delete removes its layer.
     Full/color/transparency locks block text edits; position locks block
     geometric transforms and font/size changes. Hidden text cannot be edited.
   - A text working box is limited to four million cells and 8192 cells per
@@ -311,7 +376,7 @@ tool options, layers, and a magnifier button for zoom controls.
   undo step:
   - Add column left/right and Add row above/below add one blank line of cells.
     Add multiple columns/rows opens a small dialog for a count and side. Grids
-    are limited to 500 cells per side.
+    are limited to 2000 cells per side.
   - Mirror horizontal flips left-right across the central vertical axis; Mirror
     vertical flips top-bottom. An odd center column/row stays in place.
   - Rotate right/left turns the pattern 90 degrees.
@@ -330,7 +395,7 @@ tool options, layers, and a magnifier button for zoom controls.
   move it. Selecting/adding a palette color recolors the entire preview.
 - Shapes offers Rectangle, Circle/Oval, Triangle, and five-point Star, with
   Outline or Filled styles. Drag out a shape, then resize its corner handles or
-  enter Width/Height (1-500 cells). The rotation handle or Rotation field
+  enter Width/Height (1-2000 cells). The rotation handle or Rotation field
   (0-359 degrees clockwise) rotates around its center. Equal width/height makes
   the oval a circle in grid coordinates. Style, shape, and palette color remain
   editable until placement is finalized.
@@ -354,9 +419,8 @@ tool options, layers, and a magnifier button for zoom controls.
   Paste places the cut section using the same adjustable preview as Copy.
   Cutting is one undo step; Undo restores the removed pixels without clearing
   the clipboard. Cutting an already-empty selection creates no undo step.
-- Press Delete with a grid section selected to clear its pixels to transparency
-  without changing the clipboard. The removal is one undo step; deleting an
-  empty area creates no undo step. Text/form fields keep normal Delete behavior.
+- Delete removes selected layers rather than clearing selected pixels.
+  Use Cut or Eraser to remove pixels without deleting the layer.
 - Click away from a floating line/shape/paste inside the pixel-grid viewport
   (on the grid or the empty area around it) to finalize it, or use Apply
   placement. Clicking away on the canvas places it without starting a second
@@ -364,7 +428,7 @@ tool options, layers, and a magnifier button for zoom controls.
   and controls outside the viewport leave it adjustable, so you can scroll to
   make edits beyond the visible area (choosing another tool still finalizes
   it). Each finalized placement is one undo step. Cancel,
-  Escape, Delete/Backspace (for a line, shape, or paste), or Undo while adjusting
+  Escape, Backspace (for a line, shape, or paste), or Undo while adjusting
   discards only the preview. Arrow keys move a
   focused placement or adjust a focused handle (Shift moves farther); Enter
   applies when the canvas or a handle is focused. Space/Enter on a grid cell
@@ -418,7 +482,7 @@ tool options, layers, and a magnifier button for zoom controls.
   Choose Paint or another tool to restore the normal display; reference/grid
   checkbox preferences are preserved. Arrow keys and Space/Enter also sample
   at the selected cell's center. Painting requires a selected palette color.
-- The grid-size toggle exposes a 4-500 cell longest-side slider and a typed
+- The grid-size toggle exposes a 4-2000 cell longest-side slider and a typed
   numeric field. Decimals always round down before range validation; letters
   (including exponent notation), non-numbers, and out-of-range values show an
   inline error. Enter or Apply size commits valid input; invalid input restores

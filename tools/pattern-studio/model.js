@@ -1,6 +1,7 @@
 import { validateLayers } from './layers.js';
 
-export const MAX_SIDE = 500;
+export const MAX_SIDE = 2000;
+export const MAX_REFERENCE_SIDE = 500;
 
 export function parseGridSize(value) {
     const text = String(value).trim();
@@ -12,7 +13,7 @@ export function parseGridSize(value) {
     const magnitude = Number(whole || '0');
     const size = text.startsWith('-') ? -magnitude - (/[1-9]/.test(fraction) ? 1 : 0) : magnitude;
     if (!Number.isFinite(size) || size < 4 || size > MAX_SIDE) {
-        throw new Error('Grid size must round down to a value from 4 to 500.');
+        throw new Error(`Grid size must round down to a value from 4 to ${MAX_SIDE}.`);
     }
     return size;
 }

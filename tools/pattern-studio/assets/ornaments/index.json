@@ -1,0 +1,20 @@
+[
+    {
+        "name": "Nouveau Corner-Piece",
+        "file": "nouveau-corner.svg",
+        "preview_width": 34,
+        "preview_height": 34,
+        "tags": ["art nouveau", "nouveau", "floral", "corner", "decorative"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Wavy Border",
+        "file": "wavy-border.svg",
+        "preview_width": 34,
+        "preview_height": 60,
+        "tags": ["border", "decorative", "art nouveau", "nouveau", "rounded"],
+        "type": "border",
+        "collection": null
+    }
+]

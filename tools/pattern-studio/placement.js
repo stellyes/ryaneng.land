@@ -1,6 +1,8 @@
 import { boxFromCells, copyCells, objectCorners, rasterObject, rasterLayerObject, resizeObject, snapTranslation } from './objects.js';
-import { activeLayer, layerBounds, layerVisible, selectedPixels } from './layers.js';
-import { placedText, rasterText } from './text.js';
+import { activeLayer, layerBounds, layerAlignmentBounds, layerVisible, selectedPixels } from './layers.js';
+import { placedText, rasterText, textCenter } from './text.js';
+import { placedAsset, rasterAsset } from './assets.js';
+import { MAX_SIDE } from './model.js';
 
 export function createPlacementEditor({ canvas, getProject, getColor, getStroke, getSnapping = () => false, canTransform = () => true, commitLayerPixels, commitPixels, redraw, updateControls, notify }) {
     const $ = id => document.getElementById(id);
@@ -32,6 +34,14 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             object.cy = y + object.height / 2;
         }
         pixels = null;
+        if (object?.asset && object.transformed) {
+            try { preview(); }
+            catch (error) {
+                cancel(true);
+                notify(error.message, true);
+                return;
+            }
+        }
         updateControls();
         redraw();
     }
@@ -57,6 +67,11 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     function preview() {
         if (!object) return new Map();
         const project = getProject();
+        if (!pixels && object.asset && object.transformed) {
+            pixels = new Map(rasterAsset(placedAsset(object.asset, object.originalBounds, object))
+                .filter(([x, y]) => x >= 0 && y >= 0 && x < project.cols && y < project.rows)
+                .map(([x, y, color]) => [y * project.cols + x, color]));
+        }
         if (!pixels && object.text && object.transformed) {
             pixels = new Map(rasterText(placedText(object.text, object.originalBounds, object))
                 .filter(([x, y]) => x >= 0 && y >= 0 && x < project.cols && y < project.rows)
@@ -76,7 +91,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         if (layer && transformed && commitLayerPixels) {
             try {
                 const text = object.text && placedText(object.text, object.originalBounds, object);
-                commitLayerPixels(text ? rasterText(text) : rasterLayerObject(object), false, text);
+                const asset = object.asset && placedAsset(object.asset, object.originalBounds, object);
+                commitLayerPixels(asset ? rasterAsset(asset) : text ? rasterText(text) : rasterLayerObject(object), false, text, asset);
             }
             catch (error) { notify(error.message, true); return false; }
         }
@@ -111,6 +127,10 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             source };
         if (activeLayer(project).text) {
             object.text = activeLayer(project).text;
+            object.originalBounds = { ...bounds };
+        }
+        if (activeLayer(project).asset) {
+            object.asset = activeLayer(project).asset;
             object.originalBounds = { ...bounds };
         }
         outlineSelectedLayers(activeLayer(project).id);
@@ -183,7 +203,9 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             let dx = Math.round(point.x - drag.start.x), dy = Math.round(point.y - drag.start.y);
             if (object.layer && getSnapping()) {
                 const project = getProject();
-                const snapped = snapTranslation(before, point.x - drag.start.x, point.y - drag.start.y,
+                const snappingObject = before.text
+                    ? { ...before, centerY: textCenter(placedText(before.text, before.originalBounds, before)).y } : before;
+                const snapped = snapTranslation(snappingObject, point.x - drag.start.x, point.y - drag.start.y,
                     drag.targets, project.cols, project.rows);
                 dx = snapped.dx; dy = snapped.dy; guides = snapped.guides;
             }
@@ -229,7 +251,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
             const project = getProject(), active = activeLayer(project);
             drag.targets = [{ x: 0, y: 0, width: project.cols, height: project.rows },
                 ...project.layers.filter(layer => layer.type === 'layer' && layer !== active && layerVisible(project, layer) &&
-                    (layer.offCanvas?.length || layer.cells.some(color => color !== null))).map(layer => layerBounds(project, layer))];
+                    (layer.offCanvas?.length || layer.cells.some(color => color !== null))).map(layer => layerAlignmentBounds(project, layer))];
         }
         overlay.setPointerCapture(event.pointerId);
     });
@@ -286,7 +308,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         $('line-hit').style.display = isLine ? '' : 'none';
         $('box-hit').style.display = isLine ? 'none' : '';
         $('object-help').textContent = object.kind === 'selection'
-            ? object.layer ? 'Selected layer: drag the border to move, a corner to resize, or just outside a corner to rotate. Transforms, Copy, Cut and Delete act on the active layer. Enter applies; Escape cancels the transform.'
+            ? object.layer ? 'Selected layer: drag the border to move, a corner to resize, or just outside a corner to rotate. Delete removes selected layers; Copy and Cut use active-layer pixels. Enter applies; Escape cancels the transform.'
                 : 'Copy or Cut the highlighted cells, then Paste. Drag the border or corners to adjust the selection.'
             : 'Drag corners to resize, just outside a corner to rotate, or inside to move. Palette changes recolor lines/shapes. Click away or Apply to finalize; Escape or Delete cancels. Content outside the grid is clipped.';
         if (isLine) {
@@ -323,8 +345,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function clearSelection() {
-        if (object?.text) {
-            notify('Edit the text in Tool options, or delete its layer. Text layers cannot be erased or cut as pixels.', true);
+        if (object?.text || object?.asset) {
+            notify('Rasterize vector layers before erasing or cutting pixels, or delete their layer.', true);
             return false;
         }
         releaseDrag();
@@ -355,8 +377,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     }
 
     function copy(cut = false) {
-        if (cut && object?.text) {
-            notify('Text layers cannot be cut as pixels. Use Copy, edit their text, or delete the layer.', true);
+        if (cut && (object?.text || object?.asset)) {
+            notify('Vector layers cannot be cut as pixels. Use Copy, rasterize, or delete the layer.', true);
             return;
         }
         if (object?.kind !== 'selection') {
@@ -406,8 +428,8 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
         }
         if (event.key === 'Delete' && object.kind === 'selection') {
             event.preventDefault();
-            if (object.text) {
-                notify('Edit the text in Tool options, or delete its layer. Text layers cannot be erased as pixels.', true);
+            if (object.text || object.asset) {
+                notify('Rasterize vector layers before erasing pixels, or delete their layer.', true);
                 return true;
             }
             const changed = clearSelection();
@@ -470,7 +492,7 @@ export function createPlacementEditor({ canvas, getProject, getColor, getStroke,
     for (const key of ['width', 'height', 'angle']) $(`object-${key}`).addEventListener('change', event => {
         if (!object || object.kind === 'line' || (object.kind === 'selection' && !object.layer)) return;
         if (!allowLayerTransform()) { render(); return; }
-        const value = Number(event.target.value), min = key === 'angle' ? 0 : 1, max = key === 'angle' ? 359 : 500;
+        const value = Number(event.target.value), min = key === 'angle' ? 0 : 1, max = key === 'angle' ? 359 : MAX_SIDE;
         if (!event.target.value.trim() || !Number.isInteger(value) || value < min || value > max) {
             notify(`${key} must be a whole number from ${min} to ${max}.`, true);
             event.target.value = object[key];

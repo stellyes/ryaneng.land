@@ -7,7 +7,7 @@ const distance = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2
 export function approximationDimensions(width, height, value, axis = 'cols') {
     if (![width, height, value].every(Number.isFinite) || width < 1 || height < 1 ||
         !Number.isInteger(value) || value < 1 || value > MAX_SIDE || !['cols', 'rows'].includes(axis)) {
-        throw new Error('Choose a whole grid dimension from 1 to 500.');
+        throw new Error(`Choose a whole grid dimension from 1 to ${MAX_SIDE}.`);
     }
     const side = axis === 'cols' ? width : height;
     const longest = Math.max(1, Math.min(MAX_SIDE, Math.round(value * Math.max(width, height) / side)));

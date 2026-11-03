@@ -438,6 +438,11 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
                     badge.title = 'Editable SVG text layer';
                     row.append(badge);
                 }
+                if (layer.asset) {
+                    const badge = document.createElement('span');
+                    badge.className = 'layer-asset-badge'; badge.textContent = 'SVG';
+                    badge.title = 'Editable SVG asset layer'; row.append(badge);
+                }
                 if (layer.type === 'layer') {
                     const badges = document.createElement('span');
                     badges.className = 'layer-badges';

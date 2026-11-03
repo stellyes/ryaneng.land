@@ -1,4 +1,4 @@
-import { MAX_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from './model.js';
+import { MAX_SIDE, MAX_REFERENCE_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from './model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, brushBounds, strokeWidth } from './objects.js';
@@ -6,12 +6,14 @@ import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, ma
 import { createImportPreview } from './import-preview.js';
 import { activeLayer, bindLayer, migrateLayers, serializeLayers, flattenLayers, layerOrder, layerVisible,
     createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, transformLayers,
-    layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom } from './layers.js';
+    layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom, editLayerSelection, invertSelectedLayers } from './layers.js';
 import { createLayerPanel } from './layer-panel.js';
 import { pixelColor, pixelWord } from './blending.js';
 import { showGrid, createTransparencyPattern, canvasLayout, stepZoom, MIN_ZOOM, MAX_ZOOM } from './display.js';
 import { adjustBrush } from './adjustments.js';
-import { fontCatalog, loadSvgFont, layoutText, rasterText, fontNamePreview } from './text.js';
+import { fontCatalog, loadSvgFont, layoutText, rasterText, fontNamePreview, updateTextCenter } from './text.js';
+import { createAssetLibrary } from './asset-library.js';
+import { rasterAsset, transformAsset } from './assets.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -28,6 +30,7 @@ let tool = 'paint';
 let history = [];
 let future = [];
 let stroke = null;
+let lastBrushStroke = null;
 let pan = null;
 let cursor = { x: 0, y: 0 };
 let keyboardFocus = false;
@@ -64,21 +67,24 @@ const placement = createPlacementEditor({
     getSnapping: () => $('snapping-toggle').checked,
     canTransform: () => canTransform(activeLayer(project)),
     redraw: () => renderPlacement(), updateControls, notify,
-    commitLayerPixels(entries, erase = false, text = null) {
+    commitLayerPixels(entries, erase = false, text = null, asset = null) {
         const layer = activeLayer(project);
         if (!layerVisible(project, layer)) throw new Error('Show this layer and its folders before editing.');
         if (!erase && !canTransform(layer)) throw new Error('Unlock this layer position before transforming.');
         if (layer.text && !text) throw new Error('Text layers must be edited as text, not painted pixels.');
+        if (layer.asset && !asset) throw new Error('Asset layers must be rasterized before pixel editing.');
         const remaining = erase ? [...layerPixels(project, layer)].filter(([, , color]) =>
             !canWrite(layer, color) || layer.locks.transparency) : entries;
         const raster = layerRaster(project, remaining);
         if (raster.cells.every((color, i) => layer.cells[i] === color) &&
             JSON.stringify(raster.offCanvas) === JSON.stringify(layer.offCanvas || []) &&
-            (!text || JSON.stringify(text.matrix) === JSON.stringify(layer.text.matrix))) return false;
+            (!text || JSON.stringify(text.matrix) === JSON.stringify(layer.text.matrix)) &&
+            (!asset || JSON.stringify(asset.matrix) === JSON.stringify(layer.asset.matrix))) return false;
         checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
         remember(snapshot());
         Object.assign(layer, raster);
         if (text) layer.text = text;
+        if (asset) layer.asset = asset;
         bindLayer(project);
         changed();
         return true;
@@ -87,6 +93,7 @@ const placement = createPlacementEditor({
         const layer = activeLayer(project);
         if (!project || layer?.type !== 'layer') { notify('Select a pixel layer before editing.', true); return false; }
         if (layer.text) { notify('Choose a paint layer before painting or pasting. Edit text in Tool options.', true); return false; }
+        if (layer.asset) { notify('Rasterize this asset or choose a paint layer before painting or pasting.', true); return false; }
         if (!layerVisible(project, layer)) { notify('Show this layer and its folder before editing.', true); return false; }
         if (replace && !canTransform(layer)) { notify('This layer is position-locked.', true); return false; }
         const changes = replace
@@ -116,6 +123,34 @@ const layerPanel = createLayerPanel({
         placement.selectLayers();
     },
 });
+const assetLibrary = createAssetLibrary({
+    getColor: () => selected,
+    canAdd: () => Boolean(project && !crop && largeScreen.matches),
+    report,
+    add(asset) {
+        if (!project || crop) throw new Error('Open a project and finish cropping before adding an asset.');
+        finishPan(); finishStroke();
+        if (placement.commit() === false) return false;
+        layerRoom(project, true);
+        const placed = transformAsset(asset, [1, 0, 0, 1,
+            Math.floor((project.cols - asset.width) / 2), Math.floor((project.rows - asset.height) / 2)]);
+        const layer = newLayer(project.cols, project.rows, asset.name);
+        Object.assign(layer, { asset: placed }, layerRaster(project, rasterAsset(placed)));
+        checkLayerMemory(project, [...project.layers, layer]);
+        const current = activeLayer(project), before = snapshot();
+        layer.parentId = current?.type === 'folder' ? current.id : current?.parentId || null;
+        const parent = project.layers.find(item => item.id === layer.parentId);
+        if (parent) parent.expanded = true;
+        project.layers.splice(Math.max(0, project.layers.indexOf(current)), 0, layer);
+        project.activeLayerId = layer.id; project.selectedLayerIds = [layer.id];
+        bindLayer(project); remember(before);
+        settingsPanel = 'asset'; changed(); placement.selectLayers(); render();
+        $('tools-dock').open = true;
+        notify('SVG asset added. Move, scale or rotate its selection; Undo removes the addition.');
+        return true;
+    },
+});
+$('asset-library').addEventListener('click', () => assetLibrary.open());
 
 function notify(text, error = false) {
     $('message').textContent = text;
@@ -178,6 +213,7 @@ function prepareSampler() {
 }
 
 function restoreSnapshot(saved) {
+    lastBrushStroke = null;
     placement.cancel(true);
     const { referenceImage, ...data } = saved;
     Object.assign(project, data);
@@ -196,7 +232,8 @@ function remember(before) {
         const images = new Set();
         return history.reduce((sum, item) => {
             let size = item.layers.reduce((count, layer) => count + (layer.cells?.length || 0) + (layer.offCanvas?.length || 0) * 3 +
-                (layer.text?.paths.reduce((sum, path) => sum + path.d.length / 4, 0) || 0), 0);
+                (layer.text?.paths.reduce((sum, path) => sum + path.d.length / 4, 0) || 0) +
+                (layer.asset?.paths.reduce((sum, path) => sum + path.d.length / 4, 0) || 0), 0);
             if (!images.has(item.referenceImage)) {
                 images.add(item.referenceImage);
                 size += item.width * item.height + item.reference.length / 4;
@@ -305,11 +342,18 @@ function updateControls() {
     $('cut').disabled = !active || Boolean(crop) || !placement.selecting;
     $('paste').disabled = !active || Boolean(crop) || !placement.canPaste;
     const textLayer = activeLayer(project)?.text ? activeLayer(project) : null;
+    const assetLayer = activeLayer(project)?.asset ? activeLayer(project) : null;
     if (placement.active && !crop) settingsPanel = textLayer ? 'text' : 'object';
     else if (textLayer && !crop && !['grid', 'crop'].includes(settingsPanel)) settingsPanel = 'text';
     else if (!textLayer && settingsPanel === 'text' && tool !== 'text') settingsPanel = toolPanel();
-    for (const panel of ['object', 'grid', 'crop', 'text']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
+    if (assetLayer && !crop && (placement.active || !['grid', 'crop'].includes(settingsPanel))) settingsPanel = 'asset';
+    else if (!assetLayer && settingsPanel === 'asset') settingsPanel = toolPanel();
+    for (const panel of ['object', 'grid', 'crop', 'text', 'asset']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
+    $('asset-layer-color').disabled = !assetLayer || assetLayer.locks.all || assetLayer.locks.color || Boolean(crop);
+    $('asset-rasterize').disabled = !assetLayer || assetLayer.locks.all || Boolean(crop);
+    if (assetLayer && document.activeElement !== $('asset-layer-color')) $('asset-layer-color').value = assetLayer.asset.color;
     $('text-new').disabled = !active || Boolean(crop) || creatingText;
+    $('invert-colors').disabled = !active || Boolean(crop);
     $('text-rasterize').disabled = !textLayer || textLayer.locks.all || Boolean(crop);
     for (const id of ['text-content', 'text-font', 'text-size', 'text-color']) $(id).disabled = !textLayer || textLayer.locks.all || Boolean(crop);
     if (textLayer) {
@@ -716,7 +760,7 @@ function render({ paint = true } = {}) {
 const rulers = $('rulers');
 const rulerContext = rulers.getContext('2d');
 const RULER_FONT_MIN = 8, RULER_FONT_MAX = 13, RULER_GAP = 6;
-const RULER_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 250, 500];
+const RULER_STEPS = [1, 2, 5, 10, 20, 25, 50, 100, 250, 500, 1000, 2000];
 const rulerFont = size => `600 ${size}px system-ui, sans-serif`;
 
 function rulerSideWidth(size) {
@@ -1020,8 +1064,13 @@ async function activate(data) {
     const image = await decodeImage(data.reference);
     const rect = referenceRect(data);
     if (image.naturalWidth !== rect.width || image.naturalHeight !== rect.height) throw new Error('The project reference dimensions are invalid.');
+    const legacyTextLayers = (data.layers || []).filter(layer => layer.text && layer.text.xHeight === undefined);
+    const textUpdates = await Promise.all(legacyTextLayers.map(async layer =>
+        [layer, updateTextCenter(layer.text, await loadSvgFont(layer.text.font))]));
     if (!(await protectUnsaved())) return false;
+    for (const [layer, text] of textUpdates) layer.text = text;
     project = migrateLayers(data);
+    lastBrushStroke = null;
     reference = image;
     prepareSampler();
     selected = data.palette[0] || null;
@@ -1055,11 +1104,15 @@ async function activate(data) {
     layerPanel.render();
     render();
     centerCanvas();
+    if (textUpdates.length) {
+        changed();
+        notify('Updated existing text alignment to the lowercase body center. Lettering and selection bounds are unchanged.');
+    }
     return true;
 }
 
 function imageReference(image) {
-    const size = Math.min(1, MAX_SIDE / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
+    const size = Math.min(1, MAX_REFERENCE_SIDE / Math.max(image.naturalWidth || image.width, image.naturalHeight || image.height));
     const width = Math.max(1, Math.round((image.naturalWidth || image.width) * size));
     const height = Math.max(1, Math.round((image.naturalHeight || image.height) * size));
     const thumbnail = document.createElement('canvas');
@@ -1119,6 +1172,10 @@ function previewSample(event) {
 function needsPaintColor() {
     if (tool === 'select') return false;
     const layer = activeLayer(project);
+    if (layer?.asset) {
+        notify('This is a scalable SVG asset. Rasterize it before using pixel brushes.', true);
+        return true;
+    }
     if (layer?.text) {
         notify('This is an editable text layer. Use Tool options to change its text, or rasterize it before painting.', true);
         return true;
@@ -1201,6 +1258,9 @@ function finishStroke() {
     stroke = null;
     if (canvas.hasPointerCapture(finished.id)) canvas.releasePointerCapture(finished.id);
     if (finished.changed) {
+        if (['paint', 'erase', ...adjustmentTools].includes(tool)) {
+            lastBrushStroke = { project, layer: activeLayer(project), tool, ...finished.last };
+        }
         remember(finished.before);
         changed();
     }
@@ -1238,9 +1298,14 @@ canvas.addEventListener('pointerdown', event => {
     cursor = position;
     stroke = { id: event.pointerId, before: snapshot(), last: position, changed: false, visited: new Set() };
     canvas.setPointerCapture(event.pointerId);
-    stroke.changed = applyCell(position.x, position.y);
+    const from = event.shiftKey && lastBrushStroke?.project === project &&
+        lastBrushStroke.layer === activeLayer(project) && lastBrushStroke.tool === tool
+        ? lastBrushStroke : position;
+    line(from.x, from.y, position.x, position.y, (x, y) => {
+        if (applyCell(x, y)) stroke.changed = true;
+    });
     if (tool === 'fill') return render();
-    if (stroke.changed) renderStroke(position, position);
+    if (stroke.changed) renderStroke(from, position);
     if (drawnCursor) {
         renderCells(previousCursor.x, previousCursor.y, previousCursor.x, previousCursor.y);
         drawnCursor = false;
@@ -1635,6 +1700,30 @@ $('text-rasterize').addEventListener('click', () => {
     notify('Text rasterized to editable pixels. Undo restores the editable text.');
 });
 ensureTextFonts().then(updateControls).catch(report);
+$('asset-layer-color').addEventListener('input', () => {
+    try {
+        const layer = activeLayer(project);
+        if (!layer?.asset) throw new Error('Select an asset layer.');
+        if (layer.locks.all || layer.locks.color || !layerVisible(project, layer)) throw new Error('Show and unlock this asset layer before recoloring.');
+        if (placement.commit() === false) return;
+        const asset = { ...layer.asset, color: $('asset-layer-color').value };
+        if (asset.color === layer.asset.color) return;
+        const raster = layerRaster(project, rasterAsset(asset));
+        checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
+        remember(snapshot()); Object.assign(layer, { asset }, raster); bindLayer(project);
+        changed(); placement.selectLayers(); render();
+    } catch (error) { report(error); updateControls(); }
+});
+$('asset-rasterize').addEventListener('click', () => {
+    try {
+        const layer = activeLayer(project);
+        if (!layer?.asset || layer.locks.all) throw new Error('Select an unlocked asset layer before rasterizing.');
+        if (placement.commit() === false) return;
+        remember(snapshot()); delete layer.asset; settingsPanel = toolPanel();
+        changed(); placement.selectLayers(); render();
+        notify('Asset rasterized to pixels. Undo restores SVG editability.');
+    } catch (error) { report(error); }
+});
 
 for (const id of ['adjustment-intensity', 'adjustment-range']) $(id).addEventListener(id === 'adjustment-range' ? 'input' : 'change', event => {
     if (!adjustmentTools.includes(tool)) return;
@@ -1722,6 +1811,44 @@ document.addEventListener('keydown', event => {
         else placement.paste();
     } else if (!(event.ctrlKey || event.metaKey)) placement.keydown(event);
 });
+function invertLayers() {
+    if (!project || crop) return;
+    finishStroke();
+    if (placement.commit() === false) return;
+    const before = snapshot();
+    if (!invertSelectedLayers(project)) { notify('Selected layers have no colors to invert.', true); return; }
+    remember(before);
+    changed();
+    placement.selectLayers();
+    render();
+}
+action('invert-colors', invertLayers);
+document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || event.altKey || !project || crop ||
+        !largeScreen.matches || document.querySelector('dialog[open]')) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && (target.isContentEditable ||
+        target.closest('input, textarea, select, [role="textbox"]'))) return;
+    const deleting = event.key === 'Delete' && !(event.ctrlKey || event.metaKey || event.shiftKey);
+    const inverting = (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'i';
+    if (!deleting && !inverting) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+        if (inverting) invertLayers();
+        else {
+            finishStroke();
+            if (placement.commit() === false) return;
+            const before = snapshot();
+            editLayerSelection(project, 'delete');
+            bindLayer(project);
+            remember(before);
+            changed();
+            placement.selectLayers();
+            render();
+        }
+    } catch (error) { report(error); }
+}, true);
 function setZoom(value, anchor) {
     if (!project) return;
     finishPan();
@@ -2598,7 +2725,7 @@ $('project-file').addEventListener('change', async event => {
     event.target.value = '';
     if (!file) return;
     try {
-        if (file.size > 8 * 1024 * 1024) throw new Error('Project backups must be smaller than 8 MB.');
+        if (file.size > 96 * 1024 * 1024) throw new Error('Project backups must be smaller than 96 MB.');
         const data = validateProject(JSON.parse(await file.text()));
         // Import as a copy, never overwrite another project's local save.
         if (!(await activate({ ...data, id: crypto.randomUUID(), updatedAt: Date.now() }))) return;

@@ -84,6 +84,14 @@
         </span>
       </div>
       <span class="tool-control">
+        <button id="asset-library" class="icon-button" aria-label="Asset Library" title="Asset Library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg></button>
+        <span class="tool-tooltip" aria-hidden="true">Asset Library</span>
+      </span>
+      <span class="tool-control">
+        <button id="invert-colors" class="icon-button" aria-label="Invert selected layer colors" title="Invert selected layer colors (Ctrl/Cmd+I)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></svg></button>
+        <span class="tool-tooltip" aria-hidden="true">Invert colors (Ctrl/Cmd+I)</span>
+      </span>
+      <span class="tool-control">
         <button class="icon-button" data-tool="text" aria-label="Text" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6V3h16v3M12 3v18M8 21h8"/></svg></button>
         <span class="tool-tooltip" aria-hidden="true">Text layer</span>
       </span>
@@ -165,8 +173,8 @@
         <p class="fine">Adjusts existing painted pixels only. Release and brush again to build the effect.</p>
       </div>
       <div id="object-transform">
-        <label>Width <input id="object-width" type="number" min="1" max="500" step="1" value="1" disabled></label>
-        <label>Height <input id="object-height" type="number" min="1" max="500" step="1" value="1" disabled></label>
+        <label>Width <input id="object-width" type="number" min="1" max="2000" step="1" value="1" disabled></label>
+        <label>Height <input id="object-height" type="number" min="1" max="2000" step="1" value="1" disabled></label>
         <label>Rotation <input id="object-angle" type="number" min="0" max="359" step="1" value="0" disabled> &deg;</label>
       </div>
       <div id="placement-actions">
@@ -192,13 +200,19 @@
       <p class="fine">SVG outlines stay editable. Drag the text box to move; corners scale, outside corners rotate. Press Enter in the text field for a new line.</p>
       <button id="text-rasterize" type="button" disabled>Rasterize to pixels</button>
     </section>
+    <section id="asset-settings" aria-label="Asset layer options" hidden>
+      <label for="asset-layer-color">Asset color</label>
+      <input id="asset-layer-color" type="color" value="#000000" disabled>
+      <p class="fine">Original SVG paths stay editable. Move, scale or rotate with the selection handles. The library preview background is not added to your project.</p>
+      <button id="asset-rasterize" type="button" disabled>Rasterize to pixels</button>
+    </section>
     <section id="grid-settings" class="grid-settings" hidden>
       <label for="grid-number">Cells on longest side</label>
       <input id="grid-number" type="text" inputmode="decimal" value="50" aria-describedby="grid-error grid-help" autocomplete="off">
       <label class="visually-hidden" for="grid-size">Grid size slider</label>
-      <input id="grid-size" type="range" min="4" max="500" value="50">
+      <input id="grid-size" type="range" min="4" max="2000" value="50">
       <button id="apply-grid">Apply size</button>
-      <p id="grid-help">4-500 cells. Decimals round down. Press Enter or Apply size. Resizing resamples paint; Undo restores it.</p>
+      <p id="grid-help">4-2000 cells. Decimals round down. Press Enter or Apply size. Resizing resamples paint; Undo restores it. Total layer memory limits still apply.</p>
       <p id="grid-error" role="alert"></p>
     </section>
     <section id="crop-settings" class="crop-settings" aria-label="Crop controls" hidden>
@@ -375,9 +389,9 @@
     <div id="blank-panel" role="tabpanel" aria-labelledby="blank-tab">
     <p>Start with a blank canvas.</p>
     <form id="blank-form">
-      <label>Columns <input id="blank-cols" type="number" min="1" max="500" step="1" value="50" required></label>
-      <label>Rows <input id="blank-rows" type="number" min="1" max="500" step="1" value="50" required></label>
-      <p class="fine">Dimensions are in cells, from 1 to 500 per side.</p>
+      <label>Columns <input id="blank-cols" type="number" min="1" max="2000" step="1" value="50" required></label>
+      <label>Rows <input id="blank-rows" type="number" min="1" max="2000" step="1" value="50" required></label>
+      <p class="fine">Dimensions are in cells, from 1 to 2000 per side. At 2000 &times; 2000, the layer memory budget allows one pixel/text layer.</p>
       <button type="submit" class="primary">Create blank canvas</button>
     </form>
     </div>
@@ -395,9 +409,9 @@
         <div class="import-settings">
           <fieldset id="import-controls">
             <legend>Grid size (stitches)</legend>
-            <p class="fine">Image proportions stay locked. Maximum 500 cells on the longest side.</p>
-            <label for="import-cols">Width <input id="import-cols-range" type="range" min="1" max="500" value="100" aria-label="Grid width slider"><input id="import-cols" type="number" min="1" max="500" step="1" value="100"></label>
-            <label for="import-rows">Height <input id="import-rows-range" type="range" min="1" max="500" value="100" aria-label="Grid height slider"><input id="import-rows" type="number" min="1" max="500" step="1" value="100"></label>
+            <p class="fine">Image proportions stay locked. Maximum 2000 cells on the longest side.</p>
+            <label for="import-cols">Width <input id="import-cols-range" type="range" min="1" max="2000" value="100" aria-label="Grid width slider"><input id="import-cols" type="number" min="1" max="2000" step="1" value="100"></label>
+            <label for="import-rows">Height <input id="import-rows-range" type="range" min="1" max="2000" value="100" aria-label="Grid height slider"><input id="import-rows" type="number" min="1" max="2000" step="1" value="100"></label>
             <p id="import-stitches" class="fine"></p>
             <label for="import-colors">Maximum colors <input id="import-colors-range" type="range" min="1" max="32" value="16" aria-label="Maximum colors slider"><input id="import-colors" type="number" min="1" max="32" step="1" value="16"></label>
             <details>
@@ -440,6 +454,37 @@
     <label>Add to <select id="extend-side"></select></label>
     <p id="extend-limit" class="fine"></p>
     <button id="extend-apply" class="primary">Add columns</button>
+    <p class="dialog-message" role="alert"></p>
+  </dialog>
+  <dialog id="asset-library-dialog" aria-labelledby="asset-library-title">
+    <div class="dialog-heading"><h2 id="asset-library-title">Asset Library</h2><button data-close="asset-library-dialog" type="button">Close</button></div>
+    <div class="project-tabs" role="tablist" aria-label="Asset types">
+      <button id="asset-ornament-tab" type="button" role="tab" data-asset-type="ornament" aria-selected="true" aria-controls="asset-list-panel">Ornaments</button>
+      <button id="asset-border-tab" type="button" role="tab" data-asset-type="border" aria-selected="false" aria-controls="asset-list-panel" tabindex="-1">Borders</button>
+    </div>
+    <label for="asset-search">Search by name or tags</label>
+    <input id="asset-search" type="search" placeholder="Search assets..." autocomplete="off">
+    <section id="asset-list-panel" role="tabpanel" aria-labelledby="asset-ornament-tab">
+      <h3 id="asset-collection-name"></h3>
+      <ul id="asset-list" aria-label="Assets"></ul>
+      <p id="asset-list-status" role="status"></p>
+      <button id="asset-library-retry" type="button" hidden>Retry catalog</button>
+    </section>
+    <p class="dialog-message" role="alert"></p>
+  </dialog>
+  <dialog id="asset-info-dialog" aria-labelledby="asset-info-title">
+    <div class="dialog-heading"><h2 id="asset-info-title">Asset</h2><button data-close="asset-info-dialog" type="button">Close</button></div>
+    <div class="asset-preview-frame"><canvas id="asset-preview-canvas" aria-label="Pixel-grid asset preview"></canvas></div>
+    <div class="asset-preview-controls">
+      <label>Color <input id="asset-preview-color" type="color" value="#000000"></label>
+      <label>Background <input id="asset-preview-background" type="color" value="#ffffff"></label>
+      <label>Size <input id="asset-preview-size" type="range" min="15" max="250" step="1" value="34"></label>
+    </div>
+    <p id="asset-preview-dimensions"></p>
+    <p class="fine">Size is cells on the longest side. Proportions stay locked; grid dimensions round to whole cells. Background is preview-only. Borders currently insert as single assets, without repetition.</p>
+    <button id="asset-add" type="button" class="primary" disabled>Add to project</button>
+    <button id="asset-info-retry" type="button" hidden>Retry asset</button>
+    <p id="asset-info-status" role="status"></p>
     <p class="dialog-message" role="alert"></p>
   </dialog>
   <dialog id="export-dialog" aria-labelledby="export-title">
