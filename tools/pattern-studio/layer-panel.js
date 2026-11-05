@@ -1,5 +1,6 @@
 import { BLEND_MODES, LOCKS, activeLayer, newLayer, bindLayer, layerOrder, layerAncestors, layerRoom,
-    selectedLayers, selectedPixels, editLayerSelection, alignmentPlan, alignLayers, layerPixels, layerBounds } from './layers.js';
+    selectedLayers, selectedPixels, editLayerSelection, alignmentPlan, alignLayers, layerPixels, layerBounds,
+    mergeConflict, mergeSelectedLayers, renderLayerBlends } from './layers.js';
 
 const $ = id => document.getElementById(id);
 const paths = {
@@ -99,6 +100,38 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
         }, false));
         $('layer-locks').append(button);
     }
+
+    function merge(render) {
+        edit(project => {
+            const result = mergeSelectedLayers(project, { render });
+            notify(`Merged ${result.merged} layers into the top-most selected layer${render ? ' with blend modes rendered' : ''}.` +
+                `${result.rasterized ? ' Text and asset layers were rasterized.' : ''} Undo restores the separate layers.`);
+        });
+    }
+    $('layer-merge').addEventListener('click', () => {
+        const project = getProject();
+        if (!project) return;
+        try {
+            if (beforeEdit() === false) return;
+            if (!mergeConflict(project)) { merge(false); return; }
+            $('merge-dialog').showModal();
+            $('merge-cancel').focus();
+        } catch (error) { notify(error.message, true); }
+    });
+    $('merge-cancel').addEventListener('click', () => $('merge-dialog').close());
+    for (const [id, render] of [['merge-top', false], ['merge-render', true]]) $(id).addEventListener('click', () => {
+        $('merge-dialog').close();
+        merge(render);
+    });
+    $('layer-render-blend').addEventListener('click', () => edit(project => {
+        const result = renderLayerBlends(project);
+        if (!result.rendered) {
+            notify('Selected layers already use Normal at 100% opacity; nothing to render.');
+            return false;
+        }
+        notify(`Rendered blend modes into ${result.rendered} layer${result.rendered === 1 ? '' : 's'}; they are now Normal at 100%.` +
+            `${result.rasterized ? ' Text and asset layers were rasterized.' : ''} Undo restores the blend settings.`);
+    }));
 
     function edit(operation, selecting = true) {
         try {
@@ -369,6 +402,9 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
                 const count = pixels.filter(layer => layer.locks[button.dataset.lock]).length;
                 button.setAttribute('aria-pressed', count > 0 && count < pixels.length ? 'mixed' : String(count > 0));
             }
+            $('layer-merge').disabled = pixels.length < 2 || locked;
+            $('layer-render-blend').disabled = locked || pixels.some(layer => layer.locks.color) ||
+                pixels.every(layer => (layer.blendMode ?? 'Normal') === 'Normal' && (layer.opacity ?? 1) === 1);
             const list = $('layer-list');
             const scrollTop = list.scrollTop;
             list.replaceChildren();
@@ -440,8 +476,8 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
                 }
                 if (layer.asset) {
                     const badge = document.createElement('span');
-                    badge.className = 'layer-asset-badge'; badge.textContent = 'SVG';
-                    badge.title = 'Editable SVG asset layer'; row.append(badge);
+                    badge.className = 'layer-asset-badge'; badge.textContent = layer.asset.pixelGrid ? 'GRID' : 'SVG';
+                    badge.title = layer.asset.pixelGrid ? 'Editable pixel-grid border layer' : 'Editable SVG asset layer'; row.append(badge);
                 }
                 if (layer.type === 'layer') {
                     const badges = document.createElement('span');

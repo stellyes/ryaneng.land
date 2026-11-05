@@ -6,14 +6,14 @@ import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, ma
 import { createImportPreview } from './import-preview.js';
 import { activeLayer, bindLayer, migrateLayers, serializeLayers, flattenLayers, layerOrder, layerVisible,
     createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, transformLayers,
-    layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom, editLayerSelection, invertSelectedLayers } from './layers.js';
+    layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom, editLayerSelection, invertSelectedLayers, translateLayer, turnSelectedLayers } from './layers.js';
 import { createLayerPanel } from './layer-panel.js';
 import { pixelColor, pixelWord } from './blending.js';
 import { showGrid, createTransparencyPattern, canvasLayout, stepZoom, MIN_ZOOM, MAX_ZOOM } from './display.js';
 import { adjustBrush } from './adjustments.js';
 import { fontCatalog, loadSvgFont, layoutText, rasterText, fontNamePreview, updateTextCenter } from './text.js';
 import { createAssetLibrary } from './asset-library.js';
-import { rasterAsset, transformAsset } from './assets.js';
+import { rasterAsset, transformAsset, resizeBorder, setBorderThickness, borderThicknessLimit } from './assets.js';
 
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
@@ -62,11 +62,32 @@ try {
     const saved = JSON.parse(localStorage.getItem(STROKE_KEY) || '{}');
     for (const key of Object.keys(strokeWidths)) strokeWidths[key] = strokeWidth(saved[key]);
 } catch { /* Widths fall back to 1 when storage is unavailable. */ }
+// Original layers and the undo snapshot for an in-progress Cursor move of several layers.
+let groupMove = null;
 const placement = createPlacementEditor({
     canvas, getProject: () => project, getColor: () => selected, getStroke: kind => strokeWidths[kind],
     getSnapping: () => $('snapping-toggle').checked,
+    getMoveOnly: () => tool === 'cursor',
     canTransform: () => canTransform(activeLayer(project)),
     redraw: () => renderPlacement(), updateControls, notify,
+    moveLayers(ids, dx, dy, phase) {
+        if (phase !== 'preview' && !groupMove) return;
+        if (!groupMove) groupMove = { before: snapshot(),
+            originals: new Map(project.layers.filter(layer => ids.includes(layer.id)).map(layer => [layer.id, layer])) };
+        const layers = project.layers.map(layer => {
+            const original = groupMove.originals.get(layer.id);
+            if (!original) return layer;
+            return dx || dy ? { ...original, ...translateLayer(project, original, dx, dy) } : original;
+        });
+        if (phase !== 'cancel') checkLayerMemory(project, layers);
+        project.layers = layers;
+        bindLayer(project);
+        if (phase === 'commit') {
+            remember(groupMove.before);
+            groupMove = null;
+            changed();
+        } else if (phase === 'cancel' || (!dx && !dy)) groupMove = null;
+    },
     commitLayerPixels(entries, erase = false, text = null, asset = null) {
         const layer = activeLayer(project);
         if (!layerVisible(project, layer)) throw new Error('Show this layer and its folders before editing.');
@@ -125,6 +146,7 @@ const layerPanel = createLayerPanel({
 });
 const assetLibrary = createAssetLibrary({
     getColor: () => selected,
+    getProjectSize: () => project ? { width: project.cols, height: project.rows } : null,
     canAdd: () => Boolean(project && !crop && largeScreen.matches),
     report,
     add(asset) {
@@ -132,6 +154,7 @@ const assetLibrary = createAssetLibrary({
         finishPan(); finishStroke();
         if (placement.commit() === false) return false;
         layerRoom(project, true);
+        if (asset.repeatLayout) asset = resizeBorder(asset, project.cols, project.rows);
         const placed = transformAsset(asset, [1, 0, 0, 1,
             Math.floor((project.cols - asset.width) / 2), Math.floor((project.rows - asset.height) / 2)]);
         const layer = newLayer(project.cols, project.rows, asset.name);
@@ -146,7 +169,7 @@ const assetLibrary = createAssetLibrary({
         bindLayer(project); remember(before);
         settingsPanel = 'asset'; changed(); placement.selectLayers(); render();
         $('tools-dock').open = true;
-        notify('SVG asset added. Move, scale or rotate its selection; Undo removes the addition.');
+        notify('Asset added. Move, scale or rotate its selection; Undo removes the addition.');
         return true;
     },
 });
@@ -173,7 +196,7 @@ function action(id, handler) {
         if (!['undo', 'redo', 'zoom-in', 'zoom-out', 'add-color', 'delete-color', 'copy', 'cut', 'paste', 'upload', 'new-project', 'new-image'].includes(id)) placement.commit();
     }).then(handler).catch(report));
 }
-for (const [menuId, toggleId, actionsClass] of [['file-menu', 'file-toggle', 'file-actions'], ['canvas-menu', 'canvas-toggle', 'canvas-actions']]) {
+for (const [menuId, toggleId, actionsClass] of [['file-menu', 'file-toggle', 'file-actions'], ['canvas-menu', 'canvas-toggle', 'canvas-actions'], ['layer-menu', 'layer-toggle', 'layer-actions']]) {
     $(menuId).addEventListener('click', event => {
         if (event.target.closest(`.${actionsClass} button`)) $(menuId).open = false;
     });
@@ -223,6 +246,7 @@ function restoreSnapshot(saved) {
     reference = referenceImage;
     prepareSampler();
     cursor = { x: 0, y: 0 };
+    if (tool === 'cursor') placement.selectLayers();
 }
 
 function remember(before) {
@@ -325,8 +349,8 @@ function updateControls() {
     const active = Boolean(project);
     $('workspace-controls').hidden = !active;
     // File actions all need an open project; the start screen offers projects and import instead.
-    $('file-menu').hidden = $('canvas-menu').hidden = !active;
-    if (!active) $('file-menu').open = $('canvas-menu').open = false;
+    $('file-menu').hidden = $('canvas-menu').hidden = $('layer-menu').hidden = !active;
+    if (!active) $('file-menu').open = $('canvas-menu').open = $('layer-menu').open = false;
     document.querySelectorAll('.canvas-actions button').forEach(button => { button.disabled = !active || Boolean(crop); });
     if (active) {
         for (const id of ['add-col-left', 'add-col-right', 'add-cols']) $(id).disabled ||= project.cols >= MAX_SIDE;
@@ -351,6 +375,21 @@ function updateControls() {
     for (const panel of ['object', 'grid', 'crop', 'text', 'asset']) $(`${panel}-settings`).hidden = !active || settingsPanel !== panel;
     $('asset-layer-color').disabled = !assetLayer || assetLayer.locks.all || assetLayer.locks.color || Boolean(crop);
     $('asset-rasterize').disabled = !assetLayer || assetLayer.locks.all || Boolean(crop);
+    const repeatingBorder = assetLayer?.asset.repeatLayout ? assetLayer : null;
+    $('asset-thickness-settings').hidden = !repeatingBorder;
+    $('asset-layer-thickness').disabled = !repeatingBorder || repeatingBorder.locks.all ||
+        repeatingBorder.locks.position || repeatingBorder.locks.color || repeatingBorder.locks.transparency || Boolean(crop);
+    if (repeatingBorder) {
+        const maximum = borderThicknessLimit(repeatingBorder.asset);
+        $('asset-layer-thickness').max = maximum;
+        $('asset-layer-thickness').disabled ||= maximum < 1;
+        $('asset-thickness-limit').textContent = `Maximum for this frame: ${maximum} cells. Outer dimensions stay fixed.`;
+    }
+    if (repeatingBorder && document.activeElement !== $('asset-layer-thickness')) {
+        const matrix = repeatingBorder.asset.matrix;
+        $('asset-layer-thickness').value = Math.round(repeatingBorder.asset.borderThickness *
+            Math.min(Math.hypot(matrix[0], matrix[1]), Math.hypot(matrix[2], matrix[3])));
+    }
     if (assetLayer && document.activeElement !== $('asset-layer-color')) $('asset-layer-color').value = assetLayer.asset.color;
     $('text-new').disabled = !active || Boolean(crop) || creatingText;
     $('invert-colors').disabled = !active || Boolean(crop);
@@ -478,7 +517,7 @@ $('palette-menu').addEventListener('keydown', event => {
     }
 });
 document.addEventListener('pointerdown', event => {
-    for (const id of ['palette-menu', 'file-menu', 'canvas-menu', 'yarn-menu']) {
+    for (const id of ['palette-menu', 'file-menu', 'canvas-menu', 'layer-menu', 'yarn-menu']) {
         const menu = $(id);
         if (menu.open && !menu.contains(event.target)) menu.open = false;
     }
@@ -916,7 +955,7 @@ function updateCellLayer(x0, y0, x1, y1, withPreview) {
     const cols = project.cols, recolor = Boolean(yarnLine);
     const ordered = layerOrder(project).filter(layer => layer.type === 'layer' && layerVisible(project, layer));
     const preview = withPreview ? placement.preview() : null;
-    const replacing = withPreview && placement.transformingLayer;
+    const replacing = withPreview && placement.transformingLayer && !placement.groupSelected;
     const composite = createLayerCompositor(project, preview, replacing, ordered);
     const converted = new WeakMap();
     for (let y = y0; y < y1; y++) {
@@ -1173,7 +1212,7 @@ function needsPaintColor() {
     if (tool === 'select') return false;
     const layer = activeLayer(project);
     if (layer?.asset) {
-        notify('This is a scalable SVG asset. Rasterize it before using pixel brushes.', true);
+        notify('This is an editable asset. Rasterize it before using pixel brushes.', true);
         return true;
     }
     if (layer?.text) {
@@ -1273,6 +1312,10 @@ canvas.addEventListener('pointerdown', event => {
     canvas.focus({ preventScroll: true });
     pointerFocus = false;
     keyboardFocus = false;
+    if (tool === 'cursor') {
+        if (!placement.active) placement.selectLayers();
+        return;
+    }
     if (placement.active) {
         placement.begin(event, tool);
         return;
@@ -1458,6 +1501,11 @@ window.addEventListener('blur', finishPan);
 canvas.addEventListener('keydown', event => {
     if (!project || crop || !largeScreen.matches) return;
     if (placement.keydown(event)) return;
+    if (tool === 'cursor') {
+        placement.selectLayers();
+        placement.keydown(event);
+        return;
+    }
     const moves = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
     if (tool === 'move') {
         if (moves[event.key]) {
@@ -1506,8 +1554,9 @@ canvas.addEventListener('keydown', event => {
 document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     finishPan();
     finishStroke();
-    placement.commit();
+    if (placement.commit() === false) return;
     tool = button.dataset.tool;
+    if (tool === 'cursor') placement.selectLayers();
     if (tool === 'text') {
         settingsPanel = 'text';
         ensureTextFonts().catch(report);
@@ -1523,6 +1572,7 @@ document.querySelectorAll('[data-tool]').forEach(button => button.addEventListen
     render();
     if (tool === 'sample') notify('Hover over the reference to preview a color. Click or tap to add it to your palette. Choose Paint when ready.');
     if (tool === 'move') notify('Drag the canvas to move around the zoomed view without painting. Arrow keys also pan; Shift moves farther. With any tool, hold Space and drag to pan. Choose Paint to resume drawing.');
+    if (tool === 'cursor') notify('Drag inside the highlighted layer to move it; with several layers selected, they move together. Arrow keys nudge; Shift moves 10 cells. Each move can be undone. Space-drag still pans the canvas.');
     if (adjustmentTools.includes(tool)) notify('Brush over painted pixels on the active layer. Each pixel is adjusted once per stroke; release and brush again to build the effect. No palette color is needed.');
     if (['line', 'shape', 'select'].includes(tool)) notify(tool === 'select'
         ? 'Drag a selection on the grid, then Copy or Cut and Paste.'
@@ -1721,8 +1771,32 @@ $('asset-rasterize').addEventListener('click', () => {
         if (placement.commit() === false) return;
         remember(snapshot()); delete layer.asset; settingsPanel = toolPanel();
         changed(); placement.selectLayers(); render();
-        notify('Asset rasterized to pixels. Undo restores SVG editability.');
+        notify('Asset rasterized to pixels. Undo restores asset editability.');
     } catch (error) { report(error); }
+});
+$('asset-layer-thickness').addEventListener('change', () => {
+    try {
+        const layer = activeLayer(project);
+        if (!layer?.asset.repeatLayout || crop || layer.locks.all || layer.locks.position ||
+            layer.locks.color || layer.locks.transparency || !layerVisible(project, layer)) {
+            throw new Error('Select a visible, unlocked repeating border before changing its thickness.');
+        }
+        const requested = Number($('asset-layer-thickness').value);
+        if (placement.commit() === false) return;
+        const maximum = borderThicknessLimit(layer.asset);
+        const thickness = Math.min(requested, maximum);
+        const asset = setBorderThickness(layer.asset, thickness);
+        $('asset-layer-thickness').value = thickness;
+        if (requested > maximum) notify(`Thickness capped at ${maximum} cells to fit this frame.`);
+        if (asset.borderThickness === layer.asset.borderThickness) return;
+        const raster = layerRaster(project, rasterAsset(asset));
+        checkLayerMemory(project, project.layers.map(item => item === layer ? { ...item, ...raster } : item));
+        remember(snapshot()); Object.assign(layer, { asset }, raster); bindLayer(project);
+        changed(); placement.selectLayers(); render();
+    } catch (error) { report(error); updateControls(); }
+});
+$('asset-layer-thickness').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); event.target.dispatchEvent(new Event('change')); }
 });
 
 for (const id of ['adjustment-intensity', 'adjustment-range']) $(id).addEventListener(id === 'adjustment-range' ? 'input' : 'change', event => {
@@ -1750,7 +1824,7 @@ function undo() {
     if (crop) return;
     if (placement.active) {
         const selectedLayer = placement.layerSelected && !placement.transformingLayer;
-        placement.cancel();
+        placement.cancel(tool === 'cursor');
         if (!selectedLayer) return;
     }
     finishStroke();
@@ -1823,6 +1897,21 @@ function invertLayers() {
     render();
 }
 action('invert-colors', invertLayers);
+const TURN_NOTICES = {
+    'mirror-horizontal': 'Mirrored left to right', 'mirror-vertical': 'Mirrored top to bottom',
+    'rotate-right': 'Rotated 90\u00b0 right', 'rotate-left': 'Rotated 90\u00b0 left',
+};
+function turnLayers(turn) {
+    if (!project || crop || placement.commit() === false) return;
+    const before = snapshot();
+    const count = turnSelectedLayers(project, turn);
+    remember(before);
+    changed();
+    placement.selectLayers();
+    render();
+    notify(`${TURN_NOTICES[turn]}: ${count === 1 ? '1 layer' : `${count} layers`}, each around its own center.`);
+}
+for (const turn of Object.keys(TURN_NOTICES)) action(`layer-${turn}`, () => turnLayers(turn));
 document.addEventListener('keydown', event => {
     if (event.defaultPrevented || event.isComposing || event.altKey || !project || crop ||
         !largeScreen.matches || document.querySelector('dialog[open]')) return;

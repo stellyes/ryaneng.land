@@ -1,8 +1,8 @@
-import { assetCatalog, assetList, loadAsset, assetThumbnail, createAsset, rasterAsset } from './assets.js';
+import { assetCatalog, assetList, loadAsset, assetThumbnail, createAsset, rasterAsset, resizeBorder, borderThicknessLimit } from './assets.js';
 
 const $ = id => document.getElementById(id);
 
-export function createAssetLibrary({ add, getColor, canAdd, report }) {
+export function createAssetLibrary({ add, getColor, canAdd, getProjectSize = () => null, report }) {
     let entries = [], type = 'ornament', collection = null, current = null, source = null, generation = 0;
     const dialog = $('asset-library-dialog'), info = $('asset-info-dialog'), list = $('asset-list');
     function button(label, action) {
@@ -59,9 +59,17 @@ export function createAssetLibrary({ add, getColor, canAdd, report }) {
     async function openInfo(entry) {
         current = entry; source = null;
         $('asset-info-title').textContent = entry.name;
+        $('asset-border-repeat').hidden = entry.type !== 'border';
+        $('asset-border-repeat').textContent = `Repeating: ${entry.repeating === true ? 'Yes' : 'No'}`;
+        $('asset-border-dimensions').hidden = true;
         $('asset-preview-color').value = getColor() || '#000000';
         $('asset-preview-background').value = '#ffffff';
-        $('asset-preview-size').value = Math.min(250, Math.max(15, Math.max(entry.preview_width, entry.preview_height)));
+        $('asset-preview-size').min = entry.repeat_layout ? 1 : 15;
+        $('asset-preview-size').max = entry.repeat_layout ? 1000 : 250;
+        $('asset-preview-size').title = '';
+        $('asset-preview-size-label').textContent = entry.repeat_layout ? 'Border thickness' : 'Size';
+        $('asset-preview-size').value = entry.repeat_layout ? entry.repeat_layout.thickness :
+            Math.min(250, Math.max(15, Math.max(entry.preview_width, entry.preview_height)));
         $('asset-info-status').textContent = 'Loading asset...';
         $('asset-info-retry').hidden = true;
         $('asset-add').disabled = true;
@@ -70,18 +78,45 @@ export function createAssetLibrary({ add, getColor, canAdd, report }) {
         try {
             const data = await loadAsset(entry.file);
             if (current !== entry || !info.open) return;
-            source = data; drawPreview();
+            source = data; resetDimensions(); drawPreview();
         } catch (error) {
             if (current !== entry || !info.open) return;
             $('asset-info-status').textContent = error.message; $('asset-info-retry').hidden = false; report(error);
         }
     }
     function candidate() {
-        return createAsset(current, source, Number($('asset-preview-size').value), $('asset-preview-color').value);
+        const asset = createAsset(current, source, Number($('asset-preview-size').value), $('asset-preview-color').value);
+        return asset.borderBase || asset.repeatLayout ?
+            resizeBorder(asset, Number($('asset-border-width').value), Number($('asset-border-height').value)) : asset;
+    }
+    function resetDimensions() {
+        if (!source || !current) return;
+        const asset = createAsset(current, source, Number($('asset-preview-size').value), $('asset-preview-color').value);
+        $('asset-border-dimensions').hidden = !asset.borderBase && !asset.repeatLayout;
+        const projectSize = asset.repeatLayout ? getProjectSize() : null;
+        $('asset-border-width').readOnly = Boolean(projectSize);
+        $('asset-border-height').readOnly = Boolean(projectSize);
+        $('asset-border-width').value = projectSize?.width ?? asset.width;
+        $('asset-border-height').value = projectSize?.height ?? asset.height;
+        $('asset-size-help').textContent = asset.repeatLayout
+            ? `Border thickness scales corners, ornaments and edge strips together.${asset.repeatLayout.maxThickness ? ` Maximum ${asset.repeatLayout.maxThickness} cells; pixel artwork uses nearest-neighbor scaling.` : ''} Preview dimensions match the open project; the frame initially fits its edges. Extra length changes symmetric gaps and repeat counts, not ornament size. After adding, resize freely or Shift-drag to scale up to the thickness limit. Geometric strips repeat independently.`
+            : asset.borderBase
+            ? 'Size sets initial dimensions. Decoration always scales to fit the original SVG proportions; extra width or height extends at the breakpoints. Preview size does not limit later detail. Shift-drag a corner to keep proportions. Background is preview-only.'
+            : `Size is cells on the longest side. Proportions stay locked. Background is preview-only.${current.type === 'border' ? ' Repeating tile layout is not available yet.' : ''}`;
     }
     function drawPreview() {
         if (!source || !current) return;
         try {
+            if (current.repeat_layout) {
+                const slider = $('asset-preview-size');
+                const maximum = borderThicknessLimit({ repeatLayout: current.repeat_layout,
+                    width: Number($('asset-border-width').value), height: Number($('asset-border-height').value),
+                    matrix: [1, 0, 0, 1, 0, 0] });
+                if (maximum < 1) throw new Error('Enlarge the frame to fit a one-cell border.');
+                slider.max = maximum;
+                slider.value = Math.min(Number(slider.value), maximum);
+                slider.title = `Maximum thickness for this frame: ${maximum} cells`;
+            }
             const asset = candidate(), canvas = $('asset-preview-canvas');
             const scale = Math.min(600 / asset.width, 360 / asset.height, 10);
             canvas.width = Math.max(1, Math.round(asset.width * scale));
@@ -96,7 +131,7 @@ export function createAssetLibrary({ add, getColor, canAdd, report }) {
             for (let x = 0; x <= asset.width; x++) { const at = Math.min(canvas.width - 0.5, Math.floor(x * sx) + 0.5); ctx.moveTo(at, 0); ctx.lineTo(at, canvas.height); }
             for (let y = 0; y <= asset.height; y++) { const at = Math.min(canvas.height - 0.5, Math.floor(y * sy) + 0.5); ctx.moveTo(0, at); ctx.lineTo(canvas.width, at); }
             ctx.stroke();
-            $('asset-preview-dimensions').textContent = `${asset.width} \u00d7 ${asset.height} cells`;
+            $('asset-preview-dimensions').textContent = `${asset.width} \u00d7 ${asset.height} cells${asset.repeatLayout ? `; thickness ${asset.borderThickness} cells` : ''}`;
             $('asset-info-status').textContent = '';
             $('asset-add').disabled = !canAdd();
         } catch (error) { $('asset-add').disabled = true; $('asset-info-status').textContent = error.message; report(error); }
@@ -121,7 +156,14 @@ export function createAssetLibrary({ add, getColor, canAdd, report }) {
     $('asset-search').addEventListener('input', renderList);
     $('asset-library-retry').addEventListener('click', refreshCatalog);
     $('asset-info-retry').addEventListener('click', () => openInfo(current));
-    for (const id of ['asset-preview-color', 'asset-preview-background', 'asset-preview-size']) $(id).addEventListener('input', drawPreview);
+    for (const id of ['asset-preview-color', 'asset-preview-background', 'asset-border-width', 'asset-border-height']) $(id).addEventListener('input', drawPreview);
+    $('asset-preview-size').addEventListener('input', () => {
+        try {
+            if (!current?.repeat_layout) resetDimensions();
+            drawPreview();
+        }
+        catch (error) { $('asset-add').disabled = true; $('asset-info-status').textContent = error.message; report(error); }
+    });
     $('asset-add').addEventListener('click', () => {
         try {
             if (!source || !canAdd()) throw new Error('Open a project and finish cropping before adding an asset.');

@@ -17,12 +17,15 @@ import { BLEND_MODES, LOCKS, MAX_LAYERS, MAX_LAYER_CELLS, activeLayer, bindLayer
     layerOrder, layerVisible, compositeColor, flattenLayers, serializeLayers, canWrite, writeLayerCell,
     canTransform, layerBounds, transformLayers, validateLayers, createLayerCompositor, flattenPixels, moveLayer,
     layerAncestors, layerDropAction, deleteLayer, selectedLayers, selectedPixels, editLayerSelection,
-    layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers, layerRoom, invertSelectedLayers } from '../tools/pattern-studio/layers.js';
+    layerPixels, layerRaster, translateLayer, alignmentPlan, alignLayers, layerRoom, invertSelectedLayers,
+    mergeConflict, mergeSelectedLayers, renderLayerBlends, layerTurnMatrix, turnSelectedLayers } from '../tools/pattern-studio/layers.js';
 import { rasterLayerObject } from '../tools/pattern-studio/objects.js';
 import { adjustColor, adjustBrush } from '../tools/pattern-studio/adjustments.js';
 import { fontCatalog, loadSvgFont, parseSvgFont, layoutText, rasterText, transformText, placedText, textBounds, textCenter, validateText, fontNamePreview, updateTextCenter } from '../tools/pattern-studio/text.js';
 import { assetCatalog, validateAssetCatalog, assetList, loadAsset, parseAssetSvg, createAsset,
-    validateAsset, rasterAsset, transformAsset, placedAsset, assetThumbnail } from '../tools/pattern-studio/assets.js';
+    validateAsset, rasterAsset, transformAsset, placedAsset, assetThumbnail, resizeBorder, setBorderThickness, borderThicknessLimit } from '../tools/pattern-studio/assets.js';
+import { validateRepeatLayout, repeatingBorderPlan, repeatSpacing, sequenceSpacing } from '../tools/pattern-studio/border-layout.js';
+import { createAssetLibrary } from '../tools/pattern-studio/asset-library.js';
 import { vectorBounds } from '../tools/pattern-studio/vector.js';
 const results = [];
 const assert = (condition, name) => {
@@ -38,12 +41,366 @@ const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
     {
+        const response = await fetch('../tools/pattern-studio/index.html');
+        if (!response.ok) throw new Error('Could not load asset-library UI fixture.');
+        const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const host = document.createElement('div');
+        for (const id of ['asset-library-dialog', 'asset-info-dialog']) {
+            host.append(document.importNode(html.getElementById(id), true));
+        }
+        document.body.append(host);
+        const errors = [];
+        const library = createAssetLibrary({ add: () => {}, getColor: () => '#000000',
+            canAdd: () => false, report: error => errors.push(error) });
+        const until = async predicate => {
+            const deadline = performance.now() + 10000;
+            while (!predicate()) {
+                if (performance.now() > deadline) throw new Error('Asset-library fixture timed out.');
+                await new Promise(resolve => setTimeout(resolve, 10));
+            }
+        };
+        try {
+            library.open();
+            await until(() => host.querySelector('.asset-row'));
+            host.querySelector('#asset-border-tab').click();
+            host.querySelector('[aria-label="Info about Floral Repeating Border"]').click();
+            await until(() => host.querySelector('#asset-preview-dimensions').textContent);
+            const slider = host.querySelector('#asset-preview-size');
+            const canvas = host.querySelector('#asset-preview-canvas');
+            const width = host.querySelector('#asset-border-width').value;
+            const height = host.querySelector('#asset-border-height').value;
+            const previewSize = [canvas.width, canvas.height].join();
+            for (const thickness of [1, 2, 20, 30, 40]) {
+                slider.value = thickness;
+                slider.dispatchEvent(new Event('input', { bubbles: true }));
+                assert(host.querySelector('#asset-border-width').value === width &&
+                    host.querySelector('#asset-border-height').value === height &&
+                    [canvas.width, canvas.height].join() === previewSize &&
+                    host.querySelector('#asset-preview-dimensions').textContent.endsWith(`thickness ${thickness} cells`) &&
+                    !host.querySelector('#asset-info-status').textContent,
+                    `Thickness slider updates to ${thickness} without resizing its frame or moving the preview controls`);
+            }
+            assert(!errors.length, 'Thickness slider can leave its one-cell minimum without preview failures');
+            slider.value = 1000;
+            slider.dispatchEvent(new Event('input', { bubbles: true }));
+            assert(slider.max === '40' && slider.value === '40' &&
+                host.querySelector('#asset-preview-dimensions').textContent.endsWith('thickness 40 cells') &&
+                !host.querySelector('#asset-info-status').textContent,
+                'Preview caps thickness to the complete-corner limit without an oversized-frame error');
+            host.querySelector('#asset-border-width').value = 50;
+            host.querySelector('#asset-border-height').value = 50;
+            host.querySelector('#asset-border-width').dispatchEvent(new Event('input', { bubbles: true }));
+            assert(slider.max === '20' && slider.value === '20' &&
+                host.querySelector('#asset-preview-dimensions').textContent === '50 × 50 cells; thickness 20 cells',
+                'Changing preview dimensions recalculates and caps the allowable thickness');
+        } finally {
+            host.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+            host.remove();
+        }
+    }
+    {
+        const source = parseAssetSvg('<svg viewBox="0 0 12 4"><path d="M0 0H4V4H0Z M4 0H6V2H4Z M8 0H12V1H8Z"/></svg>');
+        const layout = { thickness: 4, corner: [0, 0, 4, 4],
+            ornament: { source: [4, 0, 2, 2], offset: 1, depth: 2, minGap: 2, maxGap: 4 },
+            edges: [{ source: [8, 0, 4, 1], offset: 0, depth: 1, mode: 'stretch' }] };
+        const entry = { name: 'Recipe frame', file: 'recipe.svg', type: 'border', repeating: true,
+            repeat_layout: layout, tags: [], collection: null, preview_width: 40, preview_height: 40 };
+        validateAssetCatalog([entry]);
+        const asset = resizeBorder(createAsset(entry, source, 4, '#123456'), 40, 30);
+        const plan = repeatingBorderPlan(layout, 40, 30, 4);
+        assert(plan.sides.map(side => side.length).join() === '32,22,32,22' &&
+            plan.corners.length === 4, 'Repeating frame reserves square corners and lays out all four edges');
+        const grid = new Set(rasterAsset(asset).map(([x, y]) => `${x},${y}`));
+        assert(Array.from({ length: 40 }, (_, x) => grid.has(`${x},0`) && grid.has(`${x},29`)).every(Boolean) &&
+            Array.from({ length: 30 }, (_, y) => grid.has(`0,${y}`) && grid.has(`39,${y}`)).every(Boolean),
+            'Repeating frame sits on every outermost project row and column');
+        assert(!grid.has('20,15') && [...grid].every(key => {
+            const [x, y] = key.split(',').map(Number);
+            return x < 4 || y < 4 || x >= 36 || y >= 26;
+        }), 'All repeat geometry stays in the fixed-thickness frame, leaving the interior empty');
+        const spacing = repeatSpacing(26, 10, 2, 4);
+        assert(spacing.count === 2 && spacing.gap === 2 && spacing.starts.join() === '2,14',
+            'Extra motifs are inserted when the maximum gap is exceeded and a new unit fits');
+        assert(repeatSpacing(17, 10, 2, 4).count === 1 &&
+            repeatSpacing(9, 10, 2, 4).count === 0,
+            'Short sides keep a single complete motif or omit it instead of clipping or stretching it');
+        for (const length of [10, 20, 26, 40, 75, 200]) {
+            const result = repeatSpacing(length, 10, 2, 4);
+            assert(result.starts.every((start, i) => Math.abs(start + result.starts.at(-1 - i) + 10 - length) < 1e-8),
+                `Ornament gaps are symmetric about the center at edge length ${length}`);
+        }
+        const longer = placedAsset(asset, vectorBounds(asset), { cx: 30, cy: 20, width: 60, height: 40, angle: 0 });
+        assert(longer.borderThickness === 4 && repeatingBorderPlan(layout, longer.width, longer.height, 4)
+            .sides[0].ornaments.count > plan.sides[0].ornaments.count,
+            'Increasing frame length keeps thickness fixed and increases the ornamental repeat count');
+        const scaled = placedAsset(asset, vectorBounds(asset),
+            { cx: 40, cy: 30, width: 80, height: 60, angle: 0, borderThickness: 8 });
+        const scaledPlan = repeatingBorderPlan(layout, 80, 60, 8);
+        const stripsOnly = { ...layout }; delete stripsOnly.ornament;
+        assert(scaled.borderThickness === 8 &&
+            scaledPlan.sides.every((side, i) => side.ornaments.count === plan.sides[i].ornaments.count &&
+                side.ornaments.starts.every((start, j) => Math.abs(start - plan.sides[i].ornaments.starts[j] * 2) < 1e-8)) &&
+            rasterAsset({ ...scaled, repeatLayout: stripsOnly }).length ===
+                rasterAsset({ ...asset, repeatLayout: stripsOnly }).length * 4,
+            'Explicit whole-frame scaling scales corners, motifs, strips and thickness together');
+        const thinner = setBorderThickness(asset, 2);
+        assert(thinner.width === 40 && thinner.height === 30 && thinner.borderThickness === 2,
+            'Thickness control scales all pieces without changing the outer frame dimensions');
+        const canvasScaled = transformAsset(asset, [2, 0, 0, 2, 0, 0]);
+        const physicalOne = setBorderThickness(canvasScaled, 1);
+        assert(physicalOne.borderThickness === 0.5 && rasterAsset(physicalOne).length > 0,
+            'Thickness control uses physical stitch cells even after whole-canvas scaling');
+        const moved = transformAsset(asset, [1, 0, 0, 1, -10, 5]);
+        assert(rasterAsset(moved).some(([x]) => x < 0), 'Repeating border movement preserves off-canvas SVG pixels');
+        const integerFrame = resizeBorder(asset, 48, 36);
+        const rotated = placedAsset(integerFrame, vectorBounds(integerFrame),
+            { cx: 24, cy: 24, width: 48, height: 36, angle: 90 });
+        assert(rasterAsset(rotated).length === rasterAsset(integerFrame).length,
+            'Rotated corners and strips preserve the repeating frame raster');
+        const saved = JSON.parse(JSON.stringify(longer)); validateAsset(saved);
+        assert(JSON.stringify(rasterAsset(saved)) === JSON.stringify(rasterAsset(longer)),
+            'Repeating recipe and used SVG paths survive saving without a catalog fetch');
+        const geometric = { ...layout }; delete geometric.ornament;
+        assert(repeatingBorderPlan(geometric, 40, 30, 4).sides.every(side => !side.ornaments.count) &&
+            rasterAsset({ ...asset, repeatLayout: geometric }).length > 0,
+            'Geometric-only border recipes can use stretch strips without any ornaments');
+        rejects(() => resizeBorder(asset, 7, 30), 'Frames too small for fixed-thickness corners report an error');
+        rejects(() => setBorderThickness(asset, 16), 'Thickness changes cannot silently overlap corner pieces');
+        rejects(() => validateRepeatLayout({ ...layout, edges: [{ ...layout.edges[0], mode: 'unknown' }] }),
+            'Unknown geometric-strip modes are rejected');
+        rejects(() => validateRepeatLayout({ ...layout, edges: [{ ...layout.edges[0], phaseAfterCut: -1 }] }),
+            'Invalid post-cut geometric-strip phases are rejected');
+        rejects(() => validateRepeatLayout({ ...layout, maxThickness: 0 }),
+            'Pixel-border thickness caps must be positive whole cells');
+        rejects(() => validateRepeatLayout({ ...layout, nativeRepeat: [0, 0, 4, 4] }),
+            'Native repeat recipes require a complete ornament and separator cycle');
+        rejects(() => validateAssetCatalog([{ ...entry, file: 'pixels.png', repeat_layout: undefined }]),
+            'Standalone PNG assets without a repeating layout fail explicitly');
+        rejects(() => validateRepeatLayout({ ...layout, corner: [20, 0, 4, 4] }, source.viewBox),
+            'Recipe rectangles outside the SVG atlas are rejected');
+        rejects(() => validateAssetCatalog([{ ...entry, repeating: false }]),
+            'Repeat recipes cannot be attached to non-repeating entries');
+        rejects(() => validateAsset({ ...asset, borderThickness: NaN }), 'Invalid saved repeating thickness is rejected');
+        rejects(() => validateAsset({ ...asset, width: 7 }),
+            'Saved repeating frames too small for their corners fail before rendering');
+        rejects(() => repeatSpacing(100000, 0.001, 0, 0), 'Excessive repeat allocation fails explicitly');
+        const tiled = { ...layout, edges: [{ ...layout.edges[0], mode: 'repeat' }] };
+        const smallTiles = rasterAsset({ ...asset, repeatLayout: tiled });
+        const largeTiles = rasterAsset({ ...longer, repeatLayout: tiled });
+        const cornerPixels = entries => entries.filter(([x, y]) => x < 4 && y < 4).map(([x, y]) => `${x},${y}`).sort().join();
+        assert(cornerPixels(smallTiles) === cornerPixels(largeTiles),
+            'Changing repeat quantity leaves fixed-size corners untouched');
+        const joined = { ...layout, cornerSize: 5,
+            ornament: { ...layout.ornament,
+                separator: { source: [4, 0, 2, 2], offset: 1, depth: 2 },
+                edgeCuts: [[0, 0, 2, 1]] } };
+        const joinedPlan = repeatingBorderPlan(joined, 40, 30, 4);
+        assert(joinedPlan.cornerSize === 5 && joinedPlan.sides[0].length === 30,
+            'Extended corners reserve enough side length to preserve their terminal flowers');
+        for (const length of [1, 2, 10, 30, 75, 200]) {
+            const sequence = sequenceSpacing(length, 4, 2, 0, 3);
+            assert(sequence.starts.every((start, i) =>
+                Math.abs(start + sequence.starts.at(-1 - i) + 4 - length) < 1e-8) &&
+                sequence.separators.every((start, i) =>
+                    Math.abs(start + sequence.separators.at(-1 - i) + 2 - length) < 1e-8) &&
+                sequence.separators.length === (length < 2 ? 0 : sequence.count + 1),
+                `Flower sequences place whole separators at both corners and symmetrically between groups at ${length}`);
+        }
+        assert(sequenceSpacing(91, 49, 21, 0, 4).starts.join() === '21' &&
+            sequenceSpacing(91, 49, 21, 0, 4).separators.join() === '0,70',
+            'Native flower and scroll units reconstruct the original uninterrupted 70-cell repeat');
+        const shortDense = sequenceSpacing(48, 49, 21, 0, 4, true);
+        const mediumDense = sequenceSpacing(60, 49, 21, 0, 4, true);
+        const longDense = sequenceSpacing(140, 49, 21, 0, 4, true);
+        assert(shortDense.separators.length === 2 && shortDense.gap === 2 &&
+            mediumDense.count === 1 && mediumDense.separators.length === 0 &&
+            longDense.count === 2 && longDense.separators.length === 1,
+            'Dense sides pack two scrolls, a full flower, or two flowers around a scroll instead of sparse end-scroll layouts');
+        const densePackingFailures = [];
+        for (let length = 0; length <= 500; length++) {
+            const dense = sequenceSpacing(length, 49, 21, 0, 4, true);
+            const pieces = [...dense.starts.map(start => [start, 49]),
+                ...dense.separators.map(start => [start, 21])].sort((a, b) => a[0] - b[0]);
+            if (!(pieces.every(([start, size], i) => start >= -1e-8 && start + size <= length + 1e-8 &&
+                (!i || start >= pieces[i - 1][0] + pieces[i - 1][1] - 1e-8)) &&
+                dense.starts.every((start, i) => Math.abs(start + dense.starts.at(-1 - i) + 49 - length) < 1e-8) &&
+                dense.separators.every((start, i) => Math.abs(start + dense.separators.at(-1 - i) + 21 - length) < 1e-8))) {
+                densePackingFailures.push(length);
+            }
+        }
+        assert(!densePackingFailures.length,
+            `Dense motif packing remains whole, nonoverlapping and center-symmetric from 0 to 500 cells (failures: ${densePackingFailures})`);
+        const cutPixels = new Set(rasterAsset({ ...asset, repeatLayout: joined }).map(([x, y]) => `${x},${y}`));
+        const cutStart = Math.ceil(joinedPlan.sides[0].ornaments.starts[0] + joinedPlan.cornerSize);
+        assert(!cutPixels.has(`${cutStart},0`) && grid.has(`${cutStart},0`) &&
+            cutPixels.has(`${cutStart},1`),
+            'Ornament edge cutouts interrupt only the selected strip without erasing the motif');
+        rejects(() => validateRepeatLayout({ ...layout, cornerSize: 3 }),
+            'Extended corner size cannot be smaller than the frame thickness');
+        rejects(() => resizeBorder({ ...asset, repeatLayout: joined }, 9, 30),
+            'Small frames report an error instead of clipping extended corner flowers');
+        rejects(() => validateRepeatLayout({ ...joined,
+            ornament: { ...joined.ornament, edgeCuts: [[1, 0, 2, 1]] } }),
+            'Strip cutouts outside their ornament are rejected');
+        rejects(() => validateRepeatLayout({ ...joined,
+            ornament: { ...joined.ornament, edgeCuts: [[0, 0, 2, 1], [1, 0, 1, 1]] } }),
+            'Overlapping cutouts cannot silently restore an erased portion of the strip');
+        rejects(() => validateRepeatLayout({ ...joined,
+            ornament: { ...joined.ornament, separator: { source: [20, 0, 2, 2], offset: 1, depth: 2 } } },
+            source.viewBox), 'Separator source rectangles must fit inside the saved SVG atlas');
+        rejects(() => sequenceSpacing(100000, 0.001, 0.001, 0, 0),
+            'Excessive flower-sequence allocation fails explicitly');
+    }
+    {
         const entries = await assetCatalog();
         assert(entries.length > 0 && entries.every(entry => ['ornament', 'border'].includes(entry.type)),
             'Asset manifest loads supported categories and metadata');
         const first = entries[0], source = await loadAsset(first.file);
         assert(source.paths.length > 0 && assetThumbnail(source).querySelectorAll('path').length === source.paths.length,
             'Bundled ornament paths render a safe vector thumbnail');
+        const floral = entries.find(entry => entry.file === 'floral-repeat-border.png');
+        const floralSource = await loadAsset(floral.file);
+        const floralFrame = resizeBorder(createAsset(floral, floralSource, 40, '#123456'), 240, 320);
+        const largerFloral = resizeBorder(floralFrame, 500, 700);
+        const cornerCells = asset => rasterAsset(asset).filter(([x, y]) => x < 40 && y < 40);
+        assert(floral.repeat_layout.thickness === 40 && floralFrame.borderThickness === 40 &&
+            JSON.stringify(cornerCells(floralFrame)) === JSON.stringify(cornerCells(largerFloral)),
+            'Pixel-reference floral frame keeps the same 40-cell corner detail across project sizes');
+        assert(repeatingBorderPlan(floralFrame.repeatLayout, 500, 700, 40).sides[0].ornaments.count >
+            repeatingBorderPlan(floralFrame.repeatLayout, 240, 320, 40).sides[0].ornaments.count &&
+            rasterAsset(largerFloral).every(([x, y]) => x < 40 || x >= 460 || y < 40 || y >= 660),
+            'Real floral repeats grow with the frame while all geometry remains in its 40-cell border');
+        assert(assetThumbnail(floralSource).getAttribute('viewBox') === '0 0 60 80',
+            'Repeating asset library thumbnail displays a frame rather than the source atlas');
+        const nativeFloral = resizeBorder(floralFrame, 191, 191);
+        const screenshotPlan = repeatingBorderPlan(floralFrame.repeatLayout, 240, 148, 40);
+        assert(screenshotPlan.sides[1].ornaments.separators.length === 2 &&
+            screenshotPlan.sides[1].ornaments.gap === 2 &&
+            screenshotPlan.sides[0].ornaments.count === 2,
+            'Screenshot-sized frame fills vertical sides with two scrolls and horizontal sides with two complete flower clusters');
+        assert(borderThicknessLimit(nativeFloral) === 40 &&
+            borderThicknessLimit(transformAsset(setBorderThickness(nativeFloral, 20), [2, 0, 0, 2, 0, 0])) === 40 &&
+            borderThicknessLimit(transformAsset(nativeFloral, [0, 1, -1, 0, 0, 0])) === 40,
+            'Layer thickness limit never exceeds 40 source cells, including scaled and rotated frames');
+        rejects(() => transformAsset(nativeFloral, [2, 0, 0, 2, 0, 0]),
+            'Whole-canvas transforms cannot enlarge the pixel border beyond 40 cells');
+        rejects(() => setBorderThickness(nativeFloral, 41),
+            'Pixel-border thickness cannot exceed the native 40-cell grid');
+        rejects(() => validateAsset({ ...nativeFloral, pixelGrid: ['001', '01'] }),
+            'Malformed saved pixel-grid rows are rejected');
+        rejects(() => validateAsset({ ...nativeFloral, pixelGrid: ['002'] }),
+            'Saved pixel-grid data rejects nonbinary cells');
+        const atLimit = setBorderThickness(nativeFloral, borderThicknessLimit(nativeFloral));
+        assert(atLimit.width === nativeFloral.width && atLimit.height === nativeFloral.height &&
+            rasterAsset(atLimit).length > 0, 'Maximum allowed thickness fits complete corners without changing frame dimensions');
+        const nativePixels = new Set(rasterAsset(nativeFloral).map(([x, y]) => `${x},${y}`));
+        const referenceGrid = async name => {
+            const response = await fetch(`../tools/pattern-studio/ref/${name}`);
+            if (!response.ok) throw new Error(`Could not load exact pixel reference ${name}.`);
+            const bitmap = await createImageBitmap(await response.blob());
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = bitmap.width; canvas.height = bitmap.height;
+                const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0);
+                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                return Array.from({ length: canvas.height }, (_, y) =>
+                    Array.from({ length: canvas.width }, (_, x) => {
+                        const i = (y * canvas.width + x) * 4;
+                        return data[i + 3] >= 128 && Math.min(data[i], data[i + 1], data[i + 2]) < 128;
+                    }));
+            } finally { bitmap.close(); }
+        };
+        const [edgeReference, cornerReference] = await Promise.all([
+            referenceGrid('border.png'), referenceGrid('border-edge.png')]);
+        const exactFrame = resizeBorder(floralFrame, 261, 261);
+        const exactPixels = new Set(rasterAsset(exactFrame).map(([x, y]) => `${x},${y}`));
+        assert(Array.from({ length: 70 }, (_, u) => edgeReference[(u + 2) % 70].every((ink, d) =>
+            exactPixels.has(`${50 + u},${d}`) === ink)).every(Boolean),
+            'The entire native 40 by 70 edge repeat matches all 2800 reference cells, including scallop phase after flowers');
+        let matches = 0;
+        for (let u = 0; u < 49; u++) for (let depth = 7; depth < 32; depth++) {
+            const ink = edgeReference[(23 + u) % 70][depth];
+            if (nativePixels.has(`${71 + u},${depth}`) === ink) matches++;
+        }
+        assert(matches === 49 * 25,
+            'Complete three-flower stems match 100% of the exact 40-pixel source grid, including empty cells');
+        assert(Array.from({ length: 21 }, (_, u) => Array.from({ length: 25 }, (_, d) =>
+            nativePixels.has(`${50 + u},${7 + d}`) === edgeReference[2 + u][7 + d]).every(Boolean)).every(Boolean),
+            'Scroll separator matches every original source-grid cell without tracing or smoothing');
+        assert(cornerReference.slice(21).every((row, y) => row.every((ink, x) =>
+            nativePixels.has(`${49 - y},${x + 4}`) === ink)),
+            'Corner rendering exactly matches all 2024 supplied corner cells, including the thin diagonal links');
+        assert(floralSource.pixelGrid.length === 50 && !floralSource.paths.length,
+            'Floral border uses a saved lossless pixel grid instead of SVG paths');
+        const resizedNative = placedAsset(nativeFloral, vectorBounds(nativeFloral),
+            { cx: 150, cy: 150, width: 300, height: 300, angle: 0, borderThickness: 40 });
+        assert(resizedNative.width === 300 && resizedNative.height === 300 && resizedNative.borderThickness === 40,
+            'Ordinary pixel-frame resizing adds length without tripping the 40-cell thickness cap');
+        const fractionalResize = placedAsset(nativeFloral, vectorBounds(nativeFloral),
+            { cx: 150.25, cy: 150.25, width: 300.5, height: 300.5, angle: 0, borderThickness: 40 });
+        assert(fractionalResize.width === 301 && fractionalResize.borderThickness === 40 &&
+            Math.hypot(fractionalResize.matrix[0], fractionalResize.matrix[1]) === 1,
+            'Fractional pointer dimensions quantize to whole cells without making a 40-cell border exceed its cap');
+        assert([9, 24, 39].every(u => nativePixels.has(`${71 + u},17`) ||
+            nativePixels.has(`${71 + u},7`)) &&
+            nativePixels.has('95,0') && !nativePixels.has('87,4') && !nativePixels.has('87,6'),
+            'The middle flower reaches the outer edge and interrupts the scallop instead of truncating its stem');
+        assert(Array.from({ length: 91 }, (_, x) =>
+            nativePixels.has(`${50 + x},32`) && nativePixels.has(`${50 + x},39`)).every(Boolean),
+            'The inner geometric band maintains both continuous straight rails at the reference offsets');
+        assert([32, 39].every(inset => Array.from({ length: 191 - inset * 2 }, (_, i) => {
+            const at = inset + i, opposite = 190 - inset;
+            return nativePixels.has(`${at},${inset}`) && nativePixels.has(`${at},${opposite}`) &&
+                nativePixels.has(`${inset},${at}`) && nativePixels.has(`${opposite},${at}`);
+        }).every(Boolean)), 'Inner rails join every corner without trace-end gaps or clipped source columns');
+        const reopenedFloral = JSON.parse(JSON.stringify(nativeFloral));
+        validateAsset(reopenedFloral);
+        assert(JSON.stringify(rasterAsset(reopenedFloral)) === JSON.stringify(rasterAsset(nativeFloral)),
+            'Extended corners, scroll separators and flower cutouts survive saved-asset reopening');
+        const nativePlan = repeatingBorderPlan(nativeFloral.repeatLayout, 191, 191, 20);
+        const doublePlan = repeatingBorderPlan(nativeFloral.repeatLayout, 382, 382, 40);
+        assert(doublePlan.cornerSize === nativePlan.cornerSize * 2 &&
+            doublePlan.sides.every((side, i) =>
+                side.ornaments.count === nativePlan.sides[i].ornaments.count &&
+                side.ornaments.starts.every((start, j) => start === nativePlan.sides[i].ornaments.starts[j] * 2) &&
+                side.ornaments.separators.every((start, j) => start === nativePlan.sides[i].ornaments.separators[j] * 2)),
+            'Uniform scaling preserves the complete reference sequence and extended-corner joins');
+        const transformedFloral = transformAsset(nativeFloral, [0, 1, -1, 0, 191, 0]);
+        const originalReadback = CanvasRenderingContext2D.prototype.getImageData;
+        let readbackContext, rotatedFloral;
+        try {
+            CanvasRenderingContext2D.prototype.getImageData = function (...args) {
+                readbackContext = this;
+                return originalReadback.apply(this, args);
+            };
+            rotatedFloral = rasterAsset(transformedFloral);
+        } finally { CanvasRenderingContext2D.prototype.getImageData = originalReadback; }
+        const readback = originalReadback.call(readbackContext, 0, 0,
+            readbackContext.canvas.width, readbackContext.canvas.height);
+        const fullReadback = [];
+        for (let i = 0; i < readback.width * readback.height; i++) {
+            if (readback.data[i * 4 + 3] >= 128) {
+                fullReadback.push([i % readback.width, Math.floor(i / readback.width), transformedFloral.color]);
+            }
+        }
+        assert(JSON.stringify(rotatedFloral) === JSON.stringify(fullReadback),
+            'Skipping the empty frame center preserves every rendered pixel under axis-aligned rotation');
+        const originalPattern = CanvasRenderingContext2D.prototype.createPattern;
+        let patternCalls = 0;
+        try {
+            CanvasRenderingContext2D.prototype.createPattern = function (...args) {
+                patternCalls++;
+                return originalPattern.apply(this, args);
+            };
+            const patternFrame = setBorderThickness(largerFloral, 20);
+            rasterAsset(transformAsset(patternFrame,
+                [Math.SQRT1_2, Math.SQRT1_2, -Math.SQRT1_2, Math.SQRT1_2, 0, 0]));
+            rasterAsset(transformAsset(patternFrame, [1, 0, 0, 1, 0.5, 0]));
+            assert(patternCalls === 0,
+                'Angled and fractional transforms use nearest-neighbor sections instead of potentially different pattern sampling');
+            rasterAsset(patternFrame);
+            assert(patternCalls > 0, 'Whole-cell border strips use fast cached pattern fills');
+        } finally { CanvasRenderingContext2D.prototype.createPattern = originalPattern; }
         const fixture = [
             { ...first, name: 'Standalone', file: 'one.svg', collection: null, type: 'ornament', tags: ['floral', 'corner'] },
             { ...first, name: 'Collection Corner', file: 'two.svg', collection: 'Nouveau', type: 'ornament', tags: ['floral'] },
@@ -88,6 +445,24 @@ try {
         const movedPixels = rasterAsset(createAsset(entry, transformed, 20, '#000000'));
         assert(movedPixels.length === 100 && movedPixels.some(([x, y]) => x === 5 && y === 5),
             'SVG nested transforms compose in parent/local order');
+        {
+            const p = migrateLayers({ cols: 30, rows: 30, cells: Array(900).fill(null) });
+            Object.assign(activeLayer(p), { asset, ...layerRaster(p, rasterAsset(asset)) });
+            bindLayer(p);
+            turnSelectedLayers(p, 'rotate-right');
+            const turned = activeLayer(p);
+            const box = vectorBounds(turned.asset);
+            assert(turned.asset.matrix.slice(0, 4).join() === '0,1,-1,0' && box.x === 5 && box.y === -5 &&
+                box.width === 10 && box.height === 20 && turned.offCanvas.length === 50 &&
+                turned.cells.filter(Boolean).length === 150,
+                'Rotating an asset layer turns its editable vector around its center and keeps off-canvas stitches');
+            turnSelectedLayers(p, 'rotate-left');
+            assert(activeLayer(p).asset.matrix.join() === asset.matrix.join() && !activeLayer(p).offCanvas.length,
+                'Rotating an asset layer back restores its exact matrix');
+            turnSelectedLayers(p, 'mirror-horizontal');
+            assert(activeLayer(p).asset.matrix[0] === -1 && vectorBounds(activeLayer(p).asset).x === 0,
+                'Mirroring an asset layer flips its vector in place');
+        }
         for (const svg of [
             '<svg/>', '<svg viewBox="0 0 1 1"><script/></svg>',
             '<svg viewBox="0 0 1 1"><path onclick="alert(1)" d="M0 0Z"/></svg>',
@@ -126,6 +501,112 @@ try {
         ]) { const invalid = structuredClone(asset); change(invalid); rejects(() => validateAsset(invalid), 'Invalid saved asset metadata is rejected'); }
         rejects(() => rasterAsset(transformAsset(asset, [1000, 0, 0, 1000, 0, 0])),
             'Oversized asset transforms fail before bitmap allocation');
+        const borderEntry = { ...first, type: 'border', repeating: false,
+            breakpoints: [{ axis: 'x', position: 0.5 }, { axis: 'y', position: 0.5 }] };
+        const frameSource = parseAssetSvg('<svg viewBox="0 0 20 20" fill-rule="evenodd"><path d="M0 0H20V20H0Z M2 2H18V18H2Z"/></svg>');
+        const frame = createAsset(borderEntry, frameSource, 20, '#123456');
+        const wide = resizeBorder(frame, 40, 30);
+        const widePixels = rasterAsset(wide), has = (x, y) => widePixels.some(p => p[0] === x && p[1] === y);
+        assert(widePixels.length === 384 && has(20, 0) && has(0, 15) && !has(20, 15),
+            'Breakpoint frame scales decoration to fit and extends only surplus width');
+        assert(rasterAsset(frame).length === 144 && frame.width === 20 && wide.paths === frame.paths,
+            'Border extension keeps original SVG paths and does not mutate its source');
+        const bars = createAsset(borderEntry, parseAssetSvg('<svg viewBox="0 0 20 20"><path d="M0 0H20V2H0Z M0 18H20V20H0Z M2 2H4V4H2Z"/></svg>'), 20, '#123456');
+        const expandedBars = rasterAsset(resizeBorder(bars, 40, 30));
+        assert(expandedBars.length === 249 && expandedBars.every(p => p[1] < 6 || p[1] >= 27) &&
+            expandedBars.filter(p => p[1] >= 3 && p[1] < 6).length === 9,
+            'Corner decoration scales uniformly with the original SVG before breakpoint extension');
+        assert(rasterAsset(resizeBorder(frame, 10, 10)).length === 36,
+            'Border shrinks uniformly below its base design size');
+        assert(rasterAsset(resizeBorder(frame, 10, 30)).length === 76,
+            'A smaller width uniformly shrinks decoration while height extends independently');
+        const multiCut = createAsset({ ...borderEntry, breakpoints: [
+            { axis: 'x', position: 0.25 }, { axis: 'x', position: 0.75 }, { axis: 'y', position: 0.5 },
+        ] }, frameSource, 20, '#123456');
+        assert(rasterAsset(resizeBorder(multiCut, 40, 30)).length === 384,
+            'Multiple cuts share added space without gaps or doubled connectors');
+        const placedBorder = placedAsset(frame, vectorBounds(frame),
+            { cx: 30, cy: 20, width: 40, height: 30, angle: 0 });
+        assert(placedBorder.width === 40 && placedBorder.height === 30 && placedBorder.matrix[0] === 1 &&
+            placedBorder.matrix[3] === 1 && rasterAsset(placedBorder).length === 384,
+            'Layer placement fits SVG decoration to final dimensions and extends excess at cuts');
+        const turnedBorder = placedAsset(wide, vectorBounds(wide),
+            { cx: 30, cy: 30, width: 40, height: 30, angle: 90 });
+        assert(rasterAsset(turnedBorder).length === 384 && turnedBorder.borderBase.join() === '20,20',
+            'Rotating an extended border preserves its cuts and decoration thickness');
+        const restoredBorder = placedAsset(placedBorder, vectorBounds(placedBorder),
+            { cx: 10, cy: 10, width: 20, height: 20, angle: 0 });
+        assert(rasterAsset(restoredBorder).length === 144 && restoredBorder.borderBase.join() === '20,20',
+            'Resizing back to base dimensions restores the original border rather than accumulating scaling');
+        const doubled = placedAsset(frame, vectorBounds(frame),
+            { cx: 20, cy: 20, width: 40, height: 40, angle: 0 });
+        assert(doubled.width === 40 && doubled.height === 40 && rasterAsset(doubled).length === 576 &&
+            doubled.borderBase.join() === '20,20',
+            'Proportional border enlargement scales SVG decoration rather than only extending cuts');
+        const doubledWide = placedAsset(wide, vectorBounds(wide),
+            { cx: 40, cy: 30, width: 80, height: 60, angle: 0 });
+        assert(rasterAsset(doubledWide).length === 1536 && doubledWide.width === 80 && doubledWide.height === 60,
+            'Proportional enlargement scales previously extended gaps and decoration together');
+        const extendedScaled = placedAsset(doubled, vectorBounds(doubled),
+            { cx: 30, cy: 20, width: 60, height: 40, angle: 0 });
+        assert(rasterAsset(extendedScaled).length === 736 && extendedScaled.width === 60 &&
+            extendedScaled.height === 40,
+            'Aspect-ratio changes after scaling extend the border at its new decoration scale');
+        const halved = placedAsset(doubledWide, vectorBounds(doubledWide),
+            { cx: 20, cy: 15, width: 40, height: 30, angle: 0 });
+        assert(JSON.stringify(rasterAsset(halved)) === JSON.stringify(rasterAsset(wide)),
+            'Proportional shrinking restores an extended SVG without dependence on its initial preview size');
+        const constrained = resizeObject({ cx: 20, cy: 15, width: 40, height: 30, angle: 0 },
+            'se', { x: 80, y: 45 }, true);
+        assert(constrained.width === 80 && constrained.height === 60 && constrained.cx === 40 && constrained.cy === 30,
+            'Proportional corner resize preserves aspect ratio and anchors the opposite corner');
+        const roundedScale = placedAsset(wide, vectorBounds(wide),
+            { cx: 30.5, cy: 23, width: 61, height: 46, angle: 90 });
+        assert(roundedScale.width === 61 && roundedScale.height === 46 &&
+            Math.abs(Math.hypot(roundedScale.matrix[0], roundedScale.matrix[1]) - 1) < 1e-8,
+            'Rounded proportional dimensions still scale non-square borders during rotation');
+        const savedScale = JSON.parse(JSON.stringify(extendedScaled));
+        validateAsset(savedScale);
+        assert(JSON.stringify(rasterAsset(savedScale)) === JSON.stringify(rasterAsset(extendedScaled)),
+            'Automatic scale and extension persist together in saved SVG layers');
+        const reopened = JSON.parse(JSON.stringify(placedBorder));
+        validateAsset(reopened);
+        assert(JSON.stringify(rasterAsset(reopened)) === JSON.stringify(rasterAsset(placedBorder)),
+            'Border extension survives JSON saving without needing its catalog');
+        const wavyEntry = entries.find(item => item.file === 'wavy-border.svg');
+        const wavySource = await loadAsset(wavyEntry.file);
+        const finalBox = { cx: 150, cy: 250, width: 300, height: 500, angle: 0 };
+        let expectedBorder;
+        for (const size of [15, 34, 100, 250]) {
+            const initial = createAsset(wavyEntry, wavySource, size, '#123456');
+            const direct = placedAsset(initial, vectorBounds(initial), finalBox);
+            const pixels = JSON.stringify(rasterAsset(direct));
+            expectedBorder ??= pixels;
+            assert(pixels === expectedBorder,
+                `Wavy border placed at 300x500 has identical detail from preview size ${size}`);
+            const intermediate = placedAsset(initial, vectorBounds(initial),
+                { cx: 200, cy: 100, width: 400, height: 200, angle: 0 });
+            const indirect = placedAsset(intermediate, vectorBounds(intermediate), finalBox);
+            assert(JSON.stringify(rasterAsset(indirect)) === pixels,
+                `Wavy border detail is independent of intermediate aspect-ratio changes from size ${size}`);
+            assert(JSON.stringify(rasterAsset(resizeBorder(initial, 300, 500))) === pixels,
+                `Preview dimension controls and canvas placement use the same SVG fit at size ${size}`);
+        }
+        const repeated = createAsset({ ...borderEntry, repeating: true, breakpoints: [] }, frameSource, 20, '#123456');
+        assert(repeated.repeating && !repeated.borderBase && rasterAsset(repeated).length === 144,
+            'Repeating metadata persists while tile layout remains deferred');
+        for (const breakpoints of [[{ axis: 'z', position: 0.5 }], [{ axis: 'x', position: 0 }],
+            [{ axis: 'y', position: 1 }], [{ axis: 'x', position: 0.5 }, { axis: 'x', position: 0.5 }]]) {
+            rejects(() => validateAssetCatalog([{ ...borderEntry, breakpoints }]), 'Malformed border cuts are rejected');
+        }
+        rejects(() => validateAssetCatalog([{ ...borderEntry, repeating: true }]), 'Repeating borders cannot also declare extension cuts');
+        rejects(() => resizeBorder(frame, 0, 30), 'Border extension rejects invalid dimensions');
+        rejects(() => resizeBorder(frame, 2001, 30), 'Border extension enforces the 2000-cell dimension limit');
+        rejects(() => validateAsset({ ...frame, borderBase: [0, 20] }), 'Invalid saved border base dimensions are rejected');
+        rejects(() => validateAsset({ ...frame, breakpoints: [{ axis: 'x', position: NaN }] }),
+            'Invalid saved breakpoint coordinates are rejected');
+        rejects(() => validateAsset({ ...frame, repeating: true }),
+            'Saved repeating metadata cannot conflict with breakpoint layout');
     }
     {
         const p = migrateLayers({ cols: 2, rows: 2, cells: ['#123456', null, '#ffffff', '#000000'] });
@@ -146,6 +627,128 @@ try {
         assert(layer.text.color === '#edcba9' && layer.cells[0] === '#edcba9',
             'Folder inversion includes child text color while preserving editable metadata');
         delete layer.text;
+    }
+    {
+        const mergeProject = () => {
+            const p = migrateLayers({ cols: 3, rows: 1, cells: ['#808080', '#808080', null] });
+            const bottom = activeLayer(p);
+            const top = newLayer(3, 1, 'Top', ['#ff0000', null, '#0000ff']);
+            top.offCanvas = [[-2, 0, '#00ff00']];
+            p.layers.unshift(top);
+            p.activeLayerId = top.id;
+            p.selectedLayerIds = [bottom.id, top.id];
+            bindLayer(p);
+            return { p, top, bottom };
+        };
+        let { p, top, bottom } = mergeProject();
+        assert(!mergeConflict(p), 'Matching Normal 100% layers merge without a blend conflict');
+        let result = mergeSelectedLayers(p);
+        let merged = activeLayer(p);
+        assert(result.merged === 2 && p.layers.filter(layer => layer.type === 'layer').length === 1 && merged.id === top.id &&
+            merged.cells.join() === '#ff0000,#808080,#0000ff' && merged.offCanvas[0].join() === '-2,0,#00ff00' &&
+            p.selectedLayerIds.join() === top.id && merged.name === 'Top',
+            'Merging keeps the top-most layer identity, top colors, lower colors underneath and off-canvas pixels');
+        ({ p, top, bottom } = mergeProject());
+        top.blendMode = 'Multiply';
+        top.opacity = 0.5;
+        assert(mergeConflict(p), 'Different blend modes or opacity are reported as a merge conflict');
+        mergeSelectedLayers(p);
+        merged = activeLayer(p);
+        assert(merged.blendMode === 'Multiply' && merged.opacity === 0.5 && merged.cells[0] === '#ff0000',
+            'Merging without rendering uses the top-most layer blend mode and opacity');
+        ({ p, top, bottom } = mergeProject());
+        top.blendMode = 'Multiply';
+        const screen = flattenLayers(p);
+        mergeSelectedLayers(p, { render: true });
+        merged = activeLayer(p);
+        assert(merged.blendMode === 'Normal' && merged.opacity === 1 && flattenLayers(p).join() === screen.join() &&
+            merged.cells[0] === '#800000' && merged.offCanvas[0][2] === '#00ff00',
+            'Render merging locks in the on-screen blended colors as a Normal 100% layer');
+        ({ p, top, bottom } = mergeProject());
+        bottom.locks.all = true;
+        rejects(() => mergeSelectedLayers(p), 'Fully locked layers block merging');
+        bottom.locks.all = false;
+        bottom.visible = false;
+        rejects(() => mergeSelectedLayers(p), 'Hidden selected layers block merging');
+        bottom.visible = true;
+        p.selectedLayerIds = [top.id];
+        rejects(() => mergeSelectedLayers(p), 'Merging requires at least two selected layers');
+        ({ p, top, bottom } = mergeProject());
+        top.text = { color: '#ff0000' };
+        assert(mergeSelectedLayers(p).rasterized && !activeLayer(p).text, 'Merging rasterizes text layers');
+        ({ p, top, bottom } = mergeProject());
+        top.blendMode = 'Screen';
+        top.opacity = 0.5;
+        const before = flattenLayers(p);
+        result = renderLayerBlends(p);
+        assert(result.rendered === 1 && top !== activeLayer(p) && activeLayer(p).blendMode === 'Normal' && activeLayer(p).opacity === 1 &&
+            flattenLayers(p).join() === before.join() && p.layers.length === 2 && activeLayer(p).cells[1] === null,
+            'Render blend bakes visible colors into the selected layer without merging or covering empty cells');
+        assert(renderLayerBlends(p).rendered === 0, 'Render blend is a no-op on Normal 100% layers');
+        ({ p, top, bottom } = mergeProject());
+        top.blendMode = 'Multiply';
+        top.locks.color = true;
+        rejects(() => renderLayerBlends(p), 'Color locks block rendering blend modes');
+    }
+    {
+        const turnProject = () => {
+            const p = migrateLayers({ cols: 5, rows: 4, cells: Array(20).fill(null) });
+            const layer = activeLayer(p);
+            Object.assign(layer, layerRaster(p, [[1, 1, '#aaaaaa'], [2, 1, '#bbbbbb'], [3, 1, '#cccccc'], [1, 2, '#dddddd']]));
+            bindLayer(p);
+            return { p, layer };
+        };
+        const pixels = p => [...layerPixels(p, activeLayer(p))].map(pixel => pixel.join(':')).sort().join();
+        let { p, layer } = turnProject();
+        const original = pixels(p);
+        turnSelectedLayers(p, 'mirror-horizontal');
+        assert(pixels(p) === '1:1:#cccccc,2:1:#bbbbbb,3:1:#aaaaaa,3:2:#dddddd', 'Mirror horizontal flips a layer left-right within its own bounds');
+        ({ p } = turnProject());
+        turnSelectedLayers(p, 'mirror-vertical');
+        assert(pixels(p) === '1:1:#dddddd,1:2:#aaaaaa,2:2:#bbbbbb,3:2:#cccccc', 'Mirror vertical flips a layer top-bottom within its own bounds');
+        ({ p } = turnProject());
+        turnSelectedLayers(p, 'rotate-right');
+        assert(pixels(p) === '1:0:#dddddd,2:0:#aaaaaa,2:1:#bbbbbb,2:2:#cccccc',
+            'Rotate right turns a layer clockwise around its center, snapping a wide box up-left');
+        turnSelectedLayers(p, 'rotate-left');
+        assert(pixels(p) === original, 'Rotate left exactly undoes rotate right');
+        for (let i = 0; i < 4; i++) turnSelectedLayers(p, 'rotate-right');
+        assert(pixels(p) === original, 'Four quarter turns return a layer to its exact position');
+        turnSelectedLayers(p, 'rotate-left'); turnSelectedLayers(p, 'rotate-left');
+        const half = pixels(p);
+        ({ p } = turnProject());
+        turnSelectedLayers(p, 'mirror-horizontal'); turnSelectedLayers(p, 'mirror-vertical');
+        assert(pixels(p) === half, 'Two quarter turns equal a 180 degree turn in place');
+        assert(layerTurnMatrix({ x: 0, y: 0, width: 2, height: 3 }, 'rotate-right').join() === '0,1,-1,0,3,1',
+            'A tall box snaps down-right when a quarter turn lands on half cells');
+        ({ p, layer } = turnProject());
+        layer.offCanvas = [[-1, 1, '#eeeeee']];
+        turnSelectedLayers(p, 'mirror-horizontal');
+        assert(activeLayer(p).cells[1 * 5 + 3] === '#eeeeee' && activeLayer(p).offCanvas.join() === '-1,1,#cccccc',
+            'Off-canvas pixels are included in the layer bounds and transform');
+        ({ p, layer } = turnProject());
+        const second = newLayer(5, 4, 'Second', Array(20).fill(null));
+        second.cells[5] = '#111111';
+        second.cells[6] = '#222222';
+        const empty = newLayer(5, 4, 'Empty');
+        p.layers.unshift(second, empty);
+        p.selectedLayerIds = [layer.id, second.id, empty.id];
+        bindLayer(p);
+        assert(turnSelectedLayers(p, 'rotate-right') === 2 && pixels(p) === '1:0:#dddddd,2:0:#aaaaaa,2:1:#bbbbbb,2:2:#cccccc' &&
+            p.layers.find(l => l.id === second.id).cells.map((c, i) => c && `${i}${c}`).filter(Boolean).join() === '0#111111,5#222222',
+            'Each selected layer rotates around its own center and empty layers are skipped');
+        ({ p, layer } = turnProject());
+        layer.locks.position = true;
+        rejects(() => turnSelectedLayers(p, 'mirror-vertical'), 'Position locks block mirroring and rotating');
+        assert(pixels(p) === original, 'A blocked transform leaves the layer unchanged');
+        ({ p, layer } = turnProject());
+        layer.cells.fill(null);
+        rejects(() => turnSelectedLayers(p, 'rotate-left'), 'Empty selections report that there is nothing to transform');
+        ({ p, layer } = turnProject());
+        const folder = { id: 'turn-folder', type: 'folder', name: 'Group', parentId: null, visible: true, expanded: true };
+        p.layers.unshift(folder); layer.parentId = folder.id; p.selectedLayerIds = [folder.id];
+        turnSelectedLayers(p, 'mirror-horizontal');
+        assert(p.layers.find(l => l.id === layer.id).cells[1 * 5 + 1] === '#cccccc', 'Selected folders transform their child layers');
     }
     {
         assert(MIN_ZOOM === 0.35 && MAX_ZOOM === 8, 'Zoom spans exactly 35% through 800% of fit-to-frame');
@@ -1311,11 +1914,23 @@ try {
     try {
         const placementProject = migrateLayers({ cols: 3, rows: 2, cells: ['#ff0000', null, null, null, null, null] });
         const placementLayer = activeLayer(placementProject), testCanvas = document.getElementById('placement-test-canvas');
-        let lastNotice = '', commitCount = 0, replacement = false, snapping = true;
+        let lastNotice = '', commitCount = 0, replacement = false, snapping = true, moveOnly = false;
+        let groupOriginals = null, groupCommits = 0;
         const editor = createPlacementEditor({
             canvas: testCanvas, getProject: () => placementProject, getColor: () => '#ffffff', getStroke: () => 1,
             canTransform: () => canTransform(placementLayer), updateControls() {},
             getSnapping: () => snapping,
+            getMoveOnly: () => moveOnly,
+            moveLayers(ids, dx, dy, phase) {
+                if (phase !== 'preview' && !groupOriginals) return;
+                groupOriginals ??= new Map(placementProject.layers.filter(layer => ids.includes(layer.id)).map(layer => [layer.id, layer]));
+                placementProject.layers = placementProject.layers.map(layer => {
+                    const original = groupOriginals.get(layer.id);
+                    return !original ? layer : dx || dy ? { ...original, ...translateLayer(placementProject, original, dx, dy) } : original;
+                });
+                if (phase === 'commit') groupCommits++;
+                if (phase !== 'preview' || (!dx && !dy)) groupOriginals = null;
+            },
             redraw: () => editor.render(), notify: text => { lastNotice = text; },
             commitPixels(pixels, replace = false) {
                 commitCount++;
@@ -1477,6 +2092,133 @@ try {
         bindLayer(placementProject);
         editor.selectLayers();
         assert(!outlines().length && !overlay.hidden && hit.style.display === '', 'Single selection clears other outlines and restores active handles');
+        editor.cancel(true);
+        const repeatSource = parseAssetSvg('<svg viewBox="0 0 12 4"><path d="M0 0H4V4H0Z M4 0H6V2H4Z M8 0H12V1H8Z"/></svg>');
+        const repeatEntry = { name: 'Pointer border', file: 'pointer-border.svg', type: 'border', repeating: true,
+            repeat_layout: { thickness: 4, corner: [0, 0, 4, 4],
+                edges: [{ source: [8, 0, 4, 1], offset: 0, depth: 1, mode: 'stretch' }] } };
+        const pointerBorder = resizeBorder(createAsset(repeatEntry, repeatSource, 4, '#000000'), 40, 30);
+        Object.assign(placementLayer, { asset: pointerBorder }, layerRaster(placementProject, rasterAsset(pointerBorder)));
+        const repeatPointer = (type, x, y, shiftKey = false) => new PointerEvent(type, { bubbles: true,
+            pointerId: 7, isPrimary: true, button: 0, shiftKey,
+            clientX: rect.left + x / placementProject.cols * rect.width,
+            clientY: rect.top + y / placementProject.rows * rect.height });
+        selectPixels();
+        overlay.querySelector('[data-resize="se"]').dispatchEvent(repeatPointer('pointerdown', 40, 30, true));
+        overlay.dispatchEvent(repeatPointer('pointermove', 80, 45, true));
+        overlay.dispatchEvent(repeatPointer('pointerup', 80, 45, true));
+        const expectedScale = placedAsset(pointerBorder, vectorBounds(pointerBorder),
+            { cx: 40, cy: 30, width: 80, height: 60, angle: 0, borderThickness: 8 });
+        const previewMap = asset => [...rasterAsset(asset).map(([x, y, color]) => [y * placementProject.cols + x, color])];
+        assert(width.value === '80' && document.getElementById('object-height').value === '60' &&
+            JSON.stringify([...editor.preview()]) === JSON.stringify(previewMap(expectedScale)),
+            'Shift-pointer resizing scales repeating thickness and all corner pieces with the frame');
+        overlay.querySelector('[data-resize="se"]').dispatchEvent(repeatPointer('pointerdown', 80, 60));
+        overlay.dispatchEvent(repeatPointer('pointermove', 90, 60));
+        overlay.dispatchEvent(repeatPointer('pointerup', 90, 60));
+        const expectedExtend = placedAsset(pointerBorder, vectorBounds(pointerBorder),
+            { cx: 45, cy: 30, width: 90, height: 60, angle: 0, borderThickness: 8 });
+        assert(width.value === '90' && JSON.stringify([...editor.preview()]) === JSON.stringify(previewMap(expectedExtend)) &&
+            placementLayer.asset.borderThickness === 4,
+            'A subsequent ordinary drag retains the scaled thickness without committing or mutating the original layer');
+        editor.cancel(true);
+        assert(placementLayer.asset.borderThickness === 4 && placementLayer.asset.width === 40,
+            'Cancelling repeating-frame gestures restores the original thickness and dimensions');
+        const cappedPointerBorder = { ...pointerBorder, repeatLayout: { ...pointerBorder.repeatLayout, maxThickness: 4 } };
+        Object.assign(placementLayer, { asset: cappedPointerBorder }, layerRaster(placementProject, rasterAsset(cappedPointerBorder)));
+        selectPixels();
+        overlay.querySelector('[data-resize="se"]').dispatchEvent(repeatPointer('pointerdown', 40, 30, true));
+        overlay.dispatchEvent(repeatPointer('pointermove', 80, 45, true));
+        overlay.dispatchEvent(repeatPointer('pointerup', 80, 45, true));
+        const expectedCapped = placedAsset(cappedPointerBorder, vectorBounds(cappedPointerBorder),
+            { cx: 40, cy: 30, width: 80, height: 60, angle: 0, borderThickness: 4 });
+        assert(width.value === '80' && JSON.stringify([...editor.preview()]) === JSON.stringify(previewMap(expectedCapped)),
+            'Shift-pointer resizing grows the frame but never enlarges ornaments beyond the recipe thickness cap');
+        editor.cancel(true);
+        delete placementLayer.asset;
+        placementLayer.cells.fill(null);
+        placementLayer.cells[2020] = '#ff0000';
+        placementLayer.cells[2121] = '#00ff00';
+        placementLayer.offCanvas = [];
+        bindLayer(placementProject);
+        snapping = false; moveOnly = true;
+        selectPixels();
+        assert(!overlay.hidden && [...overlay.querySelectorAll('[data-resize], [data-rotate]')].every(node => node.hidden),
+            'Cursor outlines the active layer without resize or rotation handles');
+        const cursorCommits = commitCount;
+        key('ArrowRight');
+        assert(commitCount === cursorCommits + 1 && editor.layerSelected &&
+            !editor.transformingLayer && placementLayer.cells[2021] === '#ff0000' &&
+            placementLayer.cells[2122] === '#00ff00',
+            'Cursor keyboard nudges commit once, retain layer highlighting and preserve pixel colors');
+        hit.dispatchEvent(repeatPointer('pointerdown', 21, 20));
+        overlay.dispatchEvent(repeatPointer('pointermove', 26, 23));
+        overlay.dispatchEvent(repeatPointer('pointerup', 26, 23));
+        assert(commitCount === cursorCommits + 2 && editor.layerSelected && !editor.transformingLayer &&
+            placementLayer.cells[2326] === '#ff0000' && placementLayer.cells[2427] === '#00ff00',
+            'Cursor drag moves the whole active layer and commits automatically on release');
+        placementLayer.locks.position = true;
+        key('ArrowRight');
+        assert(commitCount === cursorCommits + 2 && lastNotice.includes('position-locked'),
+            'Cursor respects position locks and does not commit a blocked move');
+        placementLayer.locks.position = false;
+        hit.dispatchEvent(repeatPointer('pointerdown', 26, 23));
+        overlay.dispatchEvent(repeatPointer('pointermove', 30, 25));
+        overlay.dispatchEvent(repeatPointer('pointercancel', 30, 25));
+        assert(commitCount === cursorCommits + 2 && !editor.transformingLayer &&
+            placementLayer.cells[2326] === '#ff0000',
+            'Cancelled cursor gestures restore the prior layer position without committing');
+        editor.cancel(true);
+        placementLayer.cells.fill(null);
+        placementLayer.offCanvas = [];
+        bindLayer(placementProject);
+        selectPixels();
+        assert(!editor.active && !editor.layerSelected && overlay.hidden,
+            'Selecting an empty layer shows no canvas selection until something is painted');
+        key('ArrowRight');
+        assert(!editor.active && commitCount === cursorCommits + 2 && placementLayer.cells.every(color => color === null),
+            'Cursor nudges on an empty layer neither select nor change anything');
+        placementLayer.cells[2020] = '#ff0000';
+        bindLayer(placementProject);
+        selectPixels();
+        assert(editor.layerSelected && hit.getAttribute('points') === '20,20 21,20 21,21 20,21',
+            'Once painted, the layer selection frames only its painted pixels');
+        editor.cancel(true);
+        const companion = newLayer(placementProject.cols, placementProject.rows, 'Companion');
+        companion.cells[2025] = '#0000ff';
+        placementProject.layers.unshift(companion);
+        placementProject.selectedLayerIds = [placementLayer.id, companion.id];
+        bindLayer(placementProject);
+        const layerById = id => placementProject.layers.find(layer => layer.id === id);
+        selectPixels();
+        assert(editor.groupSelected && overlay.querySelectorAll('.selected-layer-outlines rect').length === 2 &&
+            hit.getAttribute('points') === '20,20 26,20 26,21 20,21',
+            'Cursor frames every selected non-empty layer as one movable group');
+        key('ArrowDown');
+        assert(groupCommits === 1 && editor.groupSelected && commitCount === cursorCommits + 2 &&
+            layerById(placementLayer.id).cells[2120] === '#ff0000' && layerById(companion.id).cells[2125] === '#0000ff' &&
+            layerById(companion.id).cells[2025] === null,
+            'Cursor nudges move all selected layers together with a single commit');
+        hit.dispatchEvent(repeatPointer('pointerdown', 21, 21));
+        overlay.dispatchEvent(repeatPointer('pointermove', 24, 21));
+        assert(!editor.preview().size && layerById(companion.id).cells[2128] === '#0000ff' &&
+            layerById(placementLayer.id).cells[2123] === '#ff0000' && groupCommits === 1,
+            'Group drags preview every selected layer live without committing');
+        overlay.dispatchEvent(repeatPointer('pointercancel', 24, 21));
+        assert(groupCommits === 1 && layerById(companion.id).cells[2125] === '#0000ff' &&
+            layerById(placementLayer.id).cells[2120] === '#ff0000' && layerById(companion.id).cells[2128] === null,
+            'Cancelled group drags restore every layer');
+        hit.dispatchEvent(repeatPointer('pointerdown', 21, 21));
+        overlay.dispatchEvent(repeatPointer('pointermove', 22, 22));
+        overlay.dispatchEvent(repeatPointer('pointerup', 22, 22));
+        assert(groupCommits === 2 && layerById(companion.id).cells[2226] === '#0000ff' &&
+            layerById(placementLayer.id).cells[2221] === '#ff0000' && editor.groupSelected,
+            'Releasing a group drag commits once and keeps the group selected');
+        layerById(companion.id).locks.position = true;
+        key('ArrowRight');
+        assert(groupCommits === 2 && lastNotice.includes('every selected layer') && layerById(companion.id).cells[2226] === '#0000ff',
+            'A position lock on any selected layer blocks the group move');
+        editor.cancel(true);
     } finally { placementFixture.remove(); }
     const paddedRecord = { ...record, width: 3, height: 2, cols: 3, rows: 2, cells: Array(6).fill(null), referenceRect: { x: 1, y: 0, width: 2, height: 2 } };
     assert(validateProject(paddedRecord) === paddedRecord, 'Padded boards with a placed reference accepted');

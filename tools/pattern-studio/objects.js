@@ -49,13 +49,19 @@ export function snapTranslation(object, dx, dy, targets, cols, rows) {
     return result;
 }
 
-export function resizeObject(object, corner, point) {
+export function resizeObject(object, corner, point, keepAspect = false) {
     const signs = { nw: [-1, -1], ne: [1, -1], se: [1, 1], sw: [-1, 1] };
     const [sx, sy] = signs[corner];
     const local = rotatePoint(point.x - object.cx, point.y - object.cy, -object.angle);
     const opposite = { x: -sx * object.width / 2, y: -sy * object.height / 2 };
-    const width = Math.max(1, Math.min(MAX_SIDE, Math.round(sx * (local.x - opposite.x))));
-    const height = Math.max(1, Math.min(MAX_SIDE, Math.round(sy * (local.y - opposite.y))));
+    let width = Math.max(1, Math.min(MAX_SIDE, Math.round(sx * (local.x - opposite.x))));
+    let height = Math.max(1, Math.min(MAX_SIDE, Math.round(sy * (local.y - opposite.y))));
+    if (keepAspect) {
+        const scale = Math.min(MAX_SIDE / object.width, MAX_SIDE / object.height,
+            Math.max(width / object.width, height / object.height));
+        width = Math.max(1, Math.round(object.width * scale));
+        height = Math.max(1, Math.round(object.height * scale));
+    }
     const center = rotatePoint(opposite.x + sx * width / 2, opposite.y + sy * height / 2, object.angle);
     return { ...object, cx: object.cx + center.x, cy: object.cy + center.y, width, height };
 }

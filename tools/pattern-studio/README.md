@@ -23,12 +23,130 @@
     even-odd holes. Strokes must be outlined; scripts are discarded without execution.
     External resources, event handlers, masks, gradients and other unsupported SVG
     elements are rejected explicitly.
-    Borders are catalogued separately but insert as single assets for now;
-    repetition/edge-layout behavior is deferred.
+  - Border Info displays **Repeating: Yes/No** (`repeating`, default false).
+    Repeating entries with a `repeat_layout` recipe render as frames. Older
+    repeating entries without a recipe remain ordinary scalable SVG assets.
+  - **Floral Repeating Border** uses the exact one-pixel-per-stitch references
+    in `ref/border.png` (40 x 70) and `ref/border-edge.png` (44 x 67).
+    `assets/ornaments/floral-repeat-border.png` is a lossless transparent atlas
+    containing a complete three-flower stem cluster, a scroll diamond,
+    a corner and two geometric strips. No SVG tracing or smoothing is used.
+    All supplied corner cells are retained; only the two missing columns at
+    the cropped horizontal arm are completed from its matching vertical arm.
+    The library shows an assembled frame rather than the atlas.
+    Default and maximum thickness are **40 stitch cells**, not CSS screen pixels.
+    Smaller thicknesses use nearest-neighbor sampling; repeats land on whole
+    cells. A native 40 x 70 edge cycle reproduces every reference cell exactly.
+    Color is applied at render time. Pixel grids and recipes are saved with
+    the layer, so reopening does not depend on fetching the catalog.
+    Existing asset layers retain their saved artwork; re-add the border from
+    the library to use a revised catalog design.
+  - A repeating frame initially fits all four outer project edges. Info shows
+    the project dimensions and a **Border thickness** slider.
+    Changing thickness keeps preview frame dimensions fixed, including when
+    no project is open, so the slider does not move during a drag.
+    After insertion, the frame is freely movable, rotatable and resizable; it is not pinned to
+    later project dimension changes. Ordinary resizing preserves thickness and
+    changes side lengths/repeat counts. **Shift-drag a corner** uniformly scales
+    thickness and the entire frame up to the asset's thickness limit; at that
+    limit only frame dimensions continue growing. Existing-layer Tool options also provide
+    a thickness control, which keeps the outer dimensions unchanged.
+    Requested thickness is 1-1000 stitch cells, subject to the frame's dimensions
+    and optional asset maximum (40 for the floral pixel border).
+    Both thickness controls cap to the largest whole-cell thickness that fits
+    two complete corners; Tool options show this maximum. Larger typed values
+    are capped with a notification rather than resizing the frame.
+    Frames must fit two complete corners in both dimensions; an error
+    asks the user to reduce thickness or enlarge the frame instead of overlapping
+    corners. Thickness, used paths and layout recipes persist through Undo,
+    duplication, recoloring, saving, JSON backups and rasterization.
+  - `repeat_layout` is a configurable recipe, not automatic image recognition:
+    - `thickness`: source border thickness in stitch cells (1-500).
+    - Optional `maxThickness`: maximum physical border thickness in cells.
+      Controls and Shift-resizing respect it; oversized canvas transforms fail
+      explicitly instead of blurring or upscaling the source.
+    - Optional `nativeRepeat`: source rectangle containing one unchanged
+      ornament-and-separator cycle. Pixel borders stamp this complete cycle
+      directly whenever no extra gap is needed, preserving every reference
+      cell and the original edge phase. With added gaps, the renderer uses
+      the separated motifs and geometric strips instead.
+    - `corner`: `[x,y,width,height]` inside the source viewBox; rotated to make four
+      corners. Optional `cornerSize` reserves additional length along each edge
+      for complete corner flowers (default: `thickness`, maximum 1000 source
+      cells). The floral corner uses 50 cells with a 40-cell border.
+    - Optional `ornament`: `source` rectangle, `offset` and `depth` in source
+      stitch cells across the border, and `minGap`/`maxGap` along the edge.
+      Complete motifs scale uniformly with thickness, never with added length.
+      Equal end/inter-motif gaps keep the layout symmetric about the center.
+      When the maximum gap is exceeded, another motif is added if it fits with
+      minimum gaps. If both thresholds cannot be met, preserving complete motifs
+      and fitting the available length take priority. Short sides omit a motif
+      that cannot fit; corners remain intact.
+      Optional `separator` (`source`, `offset`, `depth`) places a complete
+      secondary motif between every group and at both ends, with symmetric
+      spacing. The floral design uses scroll diamonds between three-flower
+      clusters and corner flowers, preserving its original 70-cell sequence.
+      Optional `dense: true` packs the most complete alternating motifs that
+      fit, allowing either flowers or scrolls at the ends. Short sides that
+      cannot fit a flower cluster pack multiple complete scrolls instead of
+      leaving a single scroll surrounded by empty space. Artwork never stretches
+      or clips to increase density. The floral pixel border enables this option.
+      Optional `edgeCuts` (up to eight non-overlapping `[start,depth,length,height]` rectangles
+      in source stitch cells) interrupt only geometric strips under a motif.
+      The middle flower breaks the outer scallop, as in the reference; the
+      inner rails remain continuous at their original depth.
+    - `edges`: up to eight strips, each with a `source` rectangle, `offset`,
+      `depth`, and `mode` (`repeat` or `stretch`). Repeat phase is anchored at
+      both corners and grows toward the center; partial edge tiles are clipped
+      only at the center seam. Stretch strips span the remaining edge length.
+      These geometric strips operate independently of floral motif spacing.
+      Optional `phaseAfterCut` restarts a repeat at that source-cell phase
+      after each ornament cutout. The floral scallop restarts one cell into
+      its four-cell tile, matching the reference after the middle flower.
+      Omit `ornament` for geometric-only borders. Different corner/strip/motif
+      designs can share the renderer by changing recipe rectangles and gaps.
+    - Source rectangles use original viewBox units (one unit per cell for PNG
+      grids; SVG units for vector assets). Offsets, depths and gaps use source stitch
+      cells and scale with thickness. Invalid/out-of-bounds recipes and excessive
+      repeat counts fail explicitly before unbounded rendering/allocation.
+      Pixel sections reuse a cached monochrome canvas with nearest-neighbor
+      sampling. Whole-cell strips use cached pattern fills instead of drawing
+      each tiny repeat separately. Axis-aligned frame readback covers only the painted margins,
+      not the empty central rectangle.
+  - Non-repeating borders can declare `breakpoints`, for example
+    `[{"axis":"x","position":0.5},{"axis":"y","position":0.5}]`.
+    Coordinates are fractions of the original SVG viewBox, strictly between
+    0 and 1. Up to eight unique cuts are supported. Decoration uniformly scales
+    to fit the current dimensions using the original SVG aspect ratio.
+    Only surplus width/height is shared
+    equally among cuts on that axis. A narrow cross-section at each cut stretches
+    into a connector; surrounding decoration is translated, not enlarged. Empty
+    cross-sections simply become more empty space. An axis without cuts scales
+    normally. Choose cuts through straight lines or blank space, not curved detail.
+  - For breakpoint borders, **Size** sets initial dimensions and resets the
+    independent **Width/Height** fields (1-2000 cells). Corner handles and numeric
+    layer dimensions use the same SVG-relative fit. Shift-drag a corner to
+    preserve proportions. Identical final boxes produce identical detail
+    regardless of preview size or previous resizes; the preview's stored base
+    dimensions are retained only for compatibility, not used as a scale limit.
+    Source paths, cuts and base dimensions persist through saving, duplication,
+    recoloring and Undo. Canvas/grid transforms still scale the entire design.
+    Rendering reuses cached SVG paths and clipped sections, without generating
+    a new path for every added stitch.
 
 - **Delete** removes selected layers/folders, including folder contents, in one
   undoable action. Editable fields and dialogs keep their normal Delete behavior.
   Locked layers and deletion of the last pixel/text layer remain protected.
+- **Cursor** highlights the active layer for movement without painting or
+  resize/rotation handles. Drag inside the highlight to move; release saves the
+  move as one undoable action. Arrow keys nudge one cell (Shift: ten cells).
+  Existing layer locks, snapping and off-canvas retention apply to pixel, text
+  and asset layers. Select another layer in the layer panel to move it.
+  With several nonempty layers selected (Ctrl/Cmd-click), Cursor shows
+  one combined frame with an outline per layer and moves them all together as
+  one undoable step; every selected layer must have its position unlocked.
+  Empty layers show no canvas selection until something is painted on them.
+  **Move** remains the separate viewport-pan tool; Space-drag pans with Cursor.
 - **Ctrl/Cmd+I**, or **Invert colors** in the toolbar, inverts RGB colors on all
   selected layers and folder contents, including off-canvas pixels. Transparency,
   opacity and blend modes remain unchanged; text stays editable with an inverted
@@ -80,6 +198,9 @@ tool options, layers, and a magnifier button for zoom controls.
 - Upload PNG, JPEG, WebP or GIF (20 MB maximum; animated images use a still frame),
   or try the built-in sample. The stored reference is resized to a longest edge
   of at most 500 pixels.
+- Line placements use small, hollow endpoint handles so the final pixels remain
+  visible. The line itself has no highlight; its invisible drag area and the
+  endpoints' larger invisible hit areas remain available for moving/adjusting.
 - The icon toolbar is divided into Drawing (Paint, Bucket fill, Eraser, Line,
   Shapes), Color adjustments (Dodge, Burn, Sponge), Text,
   Canvas (Move, Color sampler, Grid size, Crop), Selection/clipboard
@@ -251,6 +372,19 @@ tool options, layers, and a magnifier button for zoom controls.
     layer's value (or the first contained pixel layer for an active folder),
     with a mixed-value tooltip. Eye buttons still toggle only their own row.
     Selection is preserved in saves/backups and restored with action undo/redo.
+  - **Merge Layers**, right of the lock buttons, combines two or more selected
+    layers into the top-most selected layer, which keeps its name, position in
+    the stack, locks, blend mode and opacity. Upper layers win where cells
+    overlap; off-canvas pixels are kept, and text/asset layers become pixels.
+    If the selected layers' blend modes or opacities differ, a dialog offers
+    **Use top layer's blend mode** or **Render blend modes**. Render bakes the
+    on-screen colors (including visible layers below) into the merged layer and
+    sets it to Normal at 100%. Hidden or fully locked layers, or a top layer
+    with a color/transparency lock, block merging. Undo restores the layers.
+  - **Render blend** (two-circles button beside Merge) bakes each selected
+    layer's blend mode and opacity into its colors, then sets it to Normal at
+    100%, so the on-screen appearance is unchanged. It is disabled when every
+    selected layer is already Normal at 100%, or any is fully/color locked.
   - Six alignment buttons below the locks align **left / vertical center / right**
     or **top / horizontal center / bottom** to the painted bounds of the
     **bottom-most selected nonempty pixel layer in stack order**, which stays put.
@@ -385,6 +519,15 @@ tool options, layers, and a magnifier button for zoom controls.
     reference's aspect ratio are preserved. Mirror and rotate flip or turn the
     reference's exact pixels along with the grid. Cropping a padded board
     bakes any blank space inside the crop into the new reference.
+- The Layer dropdown, between Canvas and File, mirrors or rotates only the
+  selected layers (selected folders include their layers). Each layer flips or
+  turns 90 degrees around the center of its own painted bounds, including
+  off-canvas pixels; empty layers are skipped. Text and assets stay editable.
+  When a quarter turn would land on half cells, wide layers snap up-left and
+  tall layers snap down-right, so Rotate left exactly reverses Rotate right and
+  four turns return a layer to its start. Position or full locks on any
+  selected layer block the action. Each use is one undo step; the reference
+  image is not changed.
 - Paint by click, stylus, or drag, use connected four-neighbor bucket fill,
   or erase individual cells. Arrow keys and Space
   provide keyboard painting. Undo/redo includes strokes, fills, and grid resizing.

@@ -15,6 +15,42 @@
         "preview_height": 60,
         "tags": ["border", "decorative", "art nouveau", "nouveau", "rounded"],
         "type": "border",
+        "repeating": false,
+        "breakpoints": [
+            { "axis": "x", "position": 0.5 },
+            { "axis": "y", "position": 0.5 }
+        ],
         "collection": null
+    },
+    {
+        "name": "Floral Repeating Border",
+        "file": "floral-repeat-border.png",
+        "preview_width": 45,
+        "preview_height": 60,
+        "tags": ["border", "floral", "flower", "swirl", "repeating", "ornate", "geometric"],
+        "type": "border",
+        "repeating": true,
+        "collection": null,
+        "repeat_layout": {
+            "thickness": 40,
+            "maxThickness": 40,
+            "cornerSize": 50,
+            "corner": [0, 0, 50, 50],
+            "nativeRepeat": [176, 0, 70, 40],
+            "ornament": {
+                "source": [58, 0, 49, 40],
+                "offset": 0,
+                "depth": 40,
+                "minGap": 0,
+                "maxGap": 4,
+                "dense": true,
+                "separator": { "source": [115, 0, 21, 40], "offset": 0, "depth": 40 },
+                "edgeCuts": [[16, 4, 17, 3]]
+            },
+            "edges": [
+                { "source": [144, 0, 4, 3], "offset": 4, "depth": 3, "mode": "repeat", "phaseAfterCut": 1 },
+                { "source": [156, 0, 10, 8], "offset": 32, "depth": 8, "mode": "repeat" }
+            ]
+        }
     }
 ]

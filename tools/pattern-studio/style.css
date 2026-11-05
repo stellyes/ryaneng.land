@@ -105,16 +105,20 @@ h1 span {
   flex-wrap: wrap;
 }
 #file-menu,
-#canvas-menu {
+#canvas-menu,
+#layer-menu {
   position: relative;
   flex: none;
   margin-left: auto;
 }
-#canvas-menu + #file-menu {
+#canvas-menu + #file-menu,
+#canvas-menu + #layer-menu,
+#layer-menu + #file-menu {
   margin-left: 8px;
 }
 #file-toggle,
-#canvas-toggle {
+#canvas-toggle,
+#layer-toggle {
   cursor: pointer;
   padding: 8px 14px;
   border: 1px solid var(--line);
@@ -445,13 +449,26 @@ output {
   width: 55px;
   padding: 3px;
 }
+.layer-lock-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+#layer-merge-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
 #layer-locks,
+#layer-merge-actions button,
 .layer-footer {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 #layer-locks button,
+#layer-merge-actions button,
 .layer-footer button {
   display: flex;
   align-items: center;
@@ -816,7 +833,7 @@ output {
   touch-action: none;
 }
 #line-hit {
-  stroke: #f1daa855;
+  stroke: transparent;
   stroke-width: 18;
   vector-effect: non-scaling-stroke;
   pointer-events: stroke;
@@ -845,6 +862,20 @@ output {
   pointer-events: auto;
   touch-action: none;
   cursor: move;
+}
+#object-overlay .object-handle[data-edit="a"],
+#object-overlay .object-handle[data-edit="b"] {
+  width: 10px;
+  height: 10px;
+  border-width: 1px;
+  background: transparent;
+  box-shadow: 0 0 0 1px #fff;
+}
+#object-overlay .object-handle[data-edit="a"]::before,
+#object-overlay .object-handle[data-edit="b"]::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
 }
 #object-overlay [data-resize] {
   width: 12px;

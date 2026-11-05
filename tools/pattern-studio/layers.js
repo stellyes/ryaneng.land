@@ -76,6 +76,47 @@ export function alignLayers(project, mode, approveRounding = false) {
     return true;
 }
 
+export const LAYER_TURNS = ['mirror-horizontal', 'mirror-vertical', 'rotate-right', 'rotate-left'];
+
+// Maps a layer's integer bounds onto themselves (mirror) or onto the quarter-turned box around
+// the same center. A turn whose box would land on half cells snaps wide boxes up-left and tall
+// boxes down-right, so opposite turns and four equal turns restore the exact position.
+export function layerTurnMatrix(bounds, turn) {
+    const cx = bounds.x + bounds.width / 2, cy = bounds.y + bounds.height / 2;
+    if (turn === 'mirror-horizontal') return [-1, 0, 0, 1, 2 * cx, 0];
+    if (turn === 'mirror-vertical') return [1, 0, 0, -1, 0, 2 * cy];
+    if (turn !== 'rotate-right' && turn !== 'rotate-left') throw new Error('Invalid layer transform.');
+    const [a, b, c, d] = turn === 'rotate-right' ? [0, 1, -1, 0] : [0, -1, 1, 0];
+    const snap = (bounds.width + bounds.height) % 2 ? (bounds.width > bounds.height ? -0.5 : 0.5) : 0;
+    return [a, b, c, d, cx + snap - (a * cx + c * cy), cy + snap - (b * cx + d * cy)];
+}
+
+export function turnSelectedLayers(project, turn) {
+    const layers = selectedPixels(project).filter(layer => layer.text || layer.asset ||
+        layer.cells.some(color => color !== null) || layer.offCanvas?.length);
+    if (!layers.length) throw new Error('Select a layer with content to mirror or rotate.');
+    if (!layers.every(canTransform)) throw new Error('Unlock the position of every selected layer before mirroring or rotating.');
+    const turned = new Map(layers.map(layer => {
+        const [a, b, c, d, e, f] = layerTurnMatrix(layerBounds(project, layer), turn);
+        if (layer.asset) {
+            const asset = transformAsset(layer.asset, [a, b, c, d, e, f]);
+            return [layer.id, { ...layerRaster(project, rasterAsset(asset)), asset }];
+        }
+        if (layer.text) {
+            const text = transformText(layer.text, [a, b, c, d, e, f]);
+            return [layer.id, { ...layerRaster(project, rasterText(text)), text }];
+        }
+        return [layer.id, layerRaster(project, [...layerPixels(project, layer)].map(([x, y, color]) => [
+            Math.round(a * (x + 0.5) + c * (y + 0.5) + e - 0.5), Math.round(b * (x + 0.5) + d * (y + 0.5) + f - 0.5), color,
+        ]))];
+    }));
+    const next = project.layers.map(layer => turned.has(layer.id) ? { ...layer, ...turned.get(layer.id) } : layer);
+    checkLayerMemory(project, next);
+    project.layers = next;
+    bindLayer(project);
+    return turned.size;
+}
+
 export function newLayer(cols, rows, name = 'Layer 1', cells = null) {
     return {
         id: crypto.randomUUID(), type: 'layer', name, parentId: null, visible: true,
@@ -126,6 +167,106 @@ export function invertSelectedLayers(project) {
     }
     bindLayer(project);
     return changed;
+}
+
+function layerLookup(project, layer) {
+    const outside = new Map((layer.offCanvas || []).map(([x, y, color]) => [`${x},${y}`, color]));
+    return (x, y) => x >= 0 && y >= 0 && x < project.cols && y < project.rows
+        ? layer.cells[y * project.cols + x] : outside.get(`${x},${y}`) ?? null;
+}
+
+// On-screen color (over white, as in flattenLayers) of a top-first layer stack at any cell, including off-canvas.
+function stackColor(stack, x, y, index, colors) {
+    let output = [0, 0, 0, 0];
+    for (let i = stack.length - 1; i >= 0; i--) {
+        const { layer, lookup, seed } = stack[i], color = lookup(x, y), opacity = layer.opacity ?? 1;
+        if (color === null || !opacity) continue;
+        let source = colors.get(color);
+        if (!source) {
+            source = [...[1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16) / 255), 1];
+            colors.set(color, source);
+        }
+        output = blendPixel(output, source, layer.blendMode, opacity, dissolveNoise(seed, index));
+    }
+    return pixelColor(output, true);
+}
+
+function renderedEntries(project, layer, stack, colors) {
+    return [...layerPixels(project, layer)].map(([x, y]) => [x, y, stackColor(stack, x, y, y * project.cols + x, colors)]);
+}
+
+function visibleStackFrom(project, layer) {
+    const ordered = layerOrder(project).filter(item => item.type === 'layer' && layerVisible(project, item));
+    return ordered.slice(ordered.indexOf(layer)).map(item => ({ layer: item, lookup: layerLookup(project, item), seed: layerSeed(item.id) }));
+}
+
+const plainBlend = layer => (layer.blendMode ?? 'Normal') === 'Normal' && (layer.opacity ?? 1) === 1;
+
+function mergeLayers(project) {
+    const ids = new Set(selectedPixels(project).map(layer => layer.id));
+    return layerOrder(project).filter(layer => ids.has(layer.id));
+}
+
+// Merging keeps the top layer's mode and opacity, so differing modes or opacities change the result.
+export function mergeConflict(project) {
+    const [top, ...rest] = mergeLayers(project);
+    return Boolean(top) && rest.some(layer => (layer.blendMode ?? 'Normal') !== (top.blendMode ?? 'Normal') ||
+        (layer.opacity ?? 1) !== (top.opacity ?? 1));
+}
+
+export function mergeSelectedLayers(project, { render = false } = {}) {
+    const layers = mergeLayers(project);
+    if (layers.length < 2) throw new Error('Select at least two layers to merge.');
+    if (layers.some(layer => layer.locks.all)) throw new Error('Unlock all selected layers before merging.');
+    const [top] = layers;
+    if (top.locks.color || top.locks.transparency) throw new Error('Unlock the colors and transparency of the top selected layer before merging.');
+    if (layers.some(layer => !layerVisible(project, layer))) throw new Error('Show every selected layer before merging.');
+    const merged = new Map();
+    for (const layer of [...layers].reverse()) {
+        for (const [x, y, color] of layerPixels(project, layer)) merged.set(`${x},${y}`, [x, y, color]);
+    }
+    let entries = [...merged.values()];
+    if (render) {
+        const stack = visibleStackFrom(project, top), colors = new Map();
+        entries = entries.map(([x, y]) => [x, y, stackColor(stack, x, y, y * project.cols + x, colors)]);
+    }
+    const raster = layerRaster(project, entries), rasterized = layers.some(layer => layer.text || layer.asset);
+    const result = { ...top, ...raster, ...(render ? { blendMode: 'Normal', opacity: 1 } : {}) };
+    delete result.text;
+    delete result.asset;
+    if (!result.offCanvas.length) delete result.offCanvas;
+    const removed = new Set(layers.slice(1).map(layer => layer.id));
+    const updated = project.layers.filter(layer => !removed.has(layer.id)).map(layer => layer === top ? result : layer);
+    checkLayerMemory(project, updated);
+    project.layers = updated;
+    project.activeLayerId = top.id;
+    project.selectedLayerIds = [top.id];
+    bindLayer(project);
+    return { merged: layers.length, rasterized };
+}
+
+// Bakes each selected layer's on-screen colors into its pixels, then sets it to Normal at 100% opacity.
+export function renderLayerBlends(project) {
+    const layers = mergeLayers(project).filter(layer => !plainBlend(layer));
+    if (!layers.length) return { rendered: 0, rasterized: false };
+    if (layers.some(layer => layer.locks.all || layer.locks.color)) throw new Error('Unlock the colors of every selected layer before rendering blend modes.');
+    if (layers.some(layer => !layerVisible(project, layer))) throw new Error('Show every selected layer before rendering blend modes.');
+    const colors = new Map();
+    const rendered = new Map(layers.map(layer => [layer.id,
+        layerRaster(project, renderedEntries(project, layer, visibleStackFrom(project, layer), colors))]));
+    const rasterized = layers.some(layer => layer.text || layer.asset);
+    const updated = project.layers.map(layer => {
+        if (!rendered.has(layer.id)) return layer;
+        const result = { ...layer, ...rendered.get(layer.id), blendMode: 'Normal', opacity: 1 };
+        delete result.text;
+        delete result.asset;
+        if (!result.offCanvas.length) delete result.offCanvas;
+        return result;
+    });
+    checkLayerMemory(project, updated);
+    project.layers = updated;
+    bindLayer(project);
+    return { rendered: layers.length, rasterized };
 }
 
 export function editLayerSelection(project, action, drop = {}) {
