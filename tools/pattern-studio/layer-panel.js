@@ -133,7 +133,7 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
             `${result.rasterized ? ' Text and asset layers were rasterized.' : ''} Undo restores the blend settings.`);
     }));
 
-    function edit(operation, selecting = true) {
+    function edit(operation, selecting = true, { preserveTool = false } = {}) {
         try {
             const project = getProject();
             if (!project) return;
@@ -144,7 +144,7 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
             remember(before);
             changed();
             redraw();
-            if (selecting || activeLayer(project)?.type === 'layer') select();
+            if (!preserveTool && (selecting || activeLayer(project)?.type === 'layer')) select();
         } catch (error) { notify(error.message, true); }
     }
 
@@ -434,7 +434,7 @@ export function createLayerPanel({ getProject, beforeEdit, remember, snapshot, c
                 visibility.setAttribute('aria-pressed', String(layer.visible));
                 visibility.className = 'layer-eye';
                 visibility.append(icon('eye'));
-                visibility.addEventListener('click', () => edit(() => { layer.visible = !layer.visible; }, false));
+                visibility.addEventListener('click', () => edit(() => { layer.visible = !layer.visible; }, false, { preserveTool: true }));
                 const choose = document.createElement('button');
                 choose.type = 'button';
                 choose.className = 'layer-select';

@@ -176,6 +176,10 @@ try {
             'Native repeat recipes require a complete ornament and separator cycle');
         rejects(() => validateAssetCatalog([{ ...entry, file: 'pixels.png', repeat_layout: undefined }]),
             'Standalone PNG assets without a repeating layout fail explicitly');
+        assert(validateAssetCatalog([{ ...entry, file: 'borders/recipe.svg' }]).length === 1,
+            'Catalog files may live in one category folder such as borders/');
+        for (const file of ['../recipe.svg', 'borders/../recipe.svg', 'a/b/recipe.svg', '/borders/recipe.svg', 'borders\\recipe.svg'])
+            rejects(() => validateAssetCatalog([{ ...entry, file }]), `Unsafe catalog path ${file} is rejected`);
         rejects(() => validateRepeatLayout({ ...layout, corner: [20, 0, 4, 4] }, source.viewBox),
             'Recipe rectangles outside the SVG atlas are rejected');
         rejects(() => validateAssetCatalog([{ ...entry, repeating: false }]),
@@ -256,9 +260,119 @@ try {
         assert(entries.length > 0 && entries.every(entry => ['ornament', 'border'].includes(entry.type)),
             'Asset manifest loads supported categories and metadata');
         const first = entries[0], source = await loadAsset(first.file);
+        const rose = entries.find(entry => entry.file === 'borders/rose-repeat-border.png');
+        const roseSource = await loadAsset(rose.file);
+        const roseFrame = resizeBorder(createAsset(rose, roseSource, 39, '#123456'), 265, 341);
+        const rosePlan = repeatingBorderPlan(rose.repeat_layout, 265, 341, 39);
+        assert(roseSource.viewBox.join() === '0,0,76,39' &&
+            roseSource.pixelGrid.join('').split('1').length - 1 === 980 &&
+            roseFrame.borderThickness === 39,
+            'Rose border loads the exact 76 by 39 pixel motif with its native 39-cell thickness');
+        assert(rosePlan.sides[0].matrix.join() === '1,0,0,1,37,0' &&
+            rosePlan.sides[1].matrix.join() === '0,1,-1,0,265,37' &&
+            rosePlan.sides[0].ornaments.count === 3 && rosePlan.sides[1].ornaments.count === 4 &&
+            rosePlan.sides.every(side => side.ornaments.gap === 0),
+            'Rose perimeter turns clockwise with exactly two cells of corner overlap and dense native repeats');
+        const rosePixels = rasterAsset(roseFrame), roseSet = new Set(rosePixels.map(([x, y]) => `${x},${y}`));
+        assert(rosePixels.every(([x, y]) => x < 39 || x >= 226 || y < 39 || y >= 302),
+            'Rose frame never paints outside its 39-cell border or into the blank center');
+        assert(roseSource.pixelGrid.slice(0, 38).every((row, y) => [...row].slice(2).every((cell, i) =>
+            roseSet.has(`${39 + i},${y}`) === (cell === '1'))),
+            'Rose border preserves every supplied decorative pixel at native size rather than tracing or stretching it');
+        assert(Array.from({ length: 189 }, (_, i) => i + 38).every(x =>
+            roseSet.has(`${x},38`) && roseSet.has(`${x},302`)) &&
+            Array.from({ length: 265 }, (_, i) => i + 38).every(y =>
+                roseSet.has(`38,${y}`) && roseSet.has(`226,${y}`)) &&
+            !roseSet.has('150,150'),
+            'The supplied inner border becomes a continuous closed rectangle with a transparent center');
+        const spacedRose = repeatingBorderPlan(rose.repeat_layout, 300, 400, 39);
+        const leafRose = repeatingBorderPlan(rose.repeat_layout, 170, 230, 39);
+        assert(leafRose.sides[0].ornaments.count === 1 && leafRose.sides[0].fillers.length === 2 &&
+            leafRose.sides[1].ornaments.count === 2 && leafRose.sides[1].fillers.length === 2,
+            'Rose gaps repeat complete leaf ornaments between roses and beside single centered roses');
+        assert(rosePlan.sides.every(side => side.fillers.length === 0) &&
+            repeatingBorderPlan(rose.repeat_layout, 174, 174, 39).sides.every(side => side.fillers.length === 0),
+            'Leaf fillers never add ornaments to zero-gap or overlapping rose repeats');
+        const doubleLeaf = repeatingBorderPlan(rose.repeat_layout, 340, 460, 78);
+        assert(leafRose.sides.every((side, i) => side.fillers.every((fill, j) =>
+            doubleLeaf.sides[i].fillers[j].start === fill.start * 2 &&
+            doubleLeaf.sides[i].fillers[j].width === fill.width * 2)),
+            'Leaf filler positions and sizes scale uniformly with border thickness');
+        const leafFrame = resizeBorder(roseFrame, 170, 230);
+        const leafPixels = rasterAsset(leafFrame);
+        const noLeafFrame = { ...leafFrame, repeatLayout: { ...leafFrame.repeatLayout } };
+        delete noLeafFrame.repeatLayout.gapFill;
+        const noLeafSet = new Set(rasterAsset(noLeafFrame).map(([x, y]) => `${x},${y}`));
+        assert(leafPixels.some(([x, y]) => !noLeafSet.has(`${x},${y}`)) &&
+            leafPixels.every(([x, y]) => x >= 0 && y >= 0 && x < 170 && y < 230 &&
+                (x < 39 || x >= 131 || y < 39 || y >= 191)),
+            'Leaf fillers visibly fill blank pixels without painting outside the border band');
+        const leafSet = new Set(leafPixels.map(([x, y]) => `${x},${y}`));
+        const leafStart = 37 + Math.round(leafRose.sides[0].fillers[0].start);
+        assert(roseSource.pixelGrid.slice(0, 38).every((row, y) =>
+            [...row.slice(32, 64)].every((pixel, x) => pixel !== '1' || leafSet.has(`${leafStart + x},${y}`))),
+            'Leaf fillers preserve every original leaf stitch at native thickness');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout,
+            gapFill: { ...rose.repeat_layout.gapFill, source: [70, 0, 32, 38] } }, roseSource.viewBox),
+            'Leaf filler source must fit the saved pixel grid');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout,
+            gapFill: { ...rose.repeat_layout.gapFill, overlap: 32 } }),
+            'Leaf filler overlap cannot consume its whole ornament');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout,
+            gapFill: { ...rose.repeat_layout.gapFill, offset: 1 } }),
+            'Leaf filler depth cannot intrude into the inner border line');
+        const tightRose = repeatingBorderPlan(rose.repeat_layout, 174, 174, 39);
+        assert(tightRose.sides.every(side => side.ornaments.count === 2 && side.ornaments.gap === -15 &&
+            side.ornaments.starts.join() === '0,61'),
+            'Dense rose repeat fits two intact motifs with exactly fifteen cells of overlap at the threshold');
+        assert(repeatingBorderPlan(rose.repeat_layout, 173, 173, 39).sides[0].ornaments.count === 1 &&
+            repeatingBorderPlan({ ...rose.repeat_layout, motifOverlap: 0 }, 185, 185, 39).sides[0].ornaments.count === 1,
+            'Rose repeat never exceeds fifteen cells of overlap and old zero-overlap recipes keep their behavior');
+        assert(repeatingBorderPlan(rose.repeat_layout, 348, 348, 78).sides[0].ornaments.gap === -30,
+            'Neighboring rose overlap scales proportionally with border thickness');
+        const denseFrame = resizeBorder(roseFrame, 185, 185);
+        assert(rasterAsset(denseFrame).every(([x, y]) => x >= 0 && y >= 0 && x < 185 && y < 185 &&
+            (x < 39 || x >= 146 || y < 39 || y >= 146)),
+            'Overlapping roses stay inside the border frame and leave its center transparent');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout, motifOverlap: -1 }),
+            'Negative neighboring motif overlap is rejected');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout, motifOverlap: 76 }),
+            'Neighboring motif overlap cannot swallow an entire repeat');
+        assert(spacedRose.sides.every(side => side.ornaments.starts.every((start, i) =>
+            start >= 0 && start + side.unit <= side.length + 1e-8 &&
+            (!i || Math.abs(start - side.ornaments.starts[i - 1] - side.unit - side.ornaments.gap) < 1e-8))) &&
+            spacedRose.sides[0].ornaments.count === 4 && spacedRose.sides[1].ornaments.count === 5,
+            'Non-multiple rose frames pack the maximum number of complete motifs and distribute leftover space uniformly');
+        const scaledRose = transformAsset(roseFrame, [2, 0, 0, 2, 0, 0]);
+        assert(rasterAsset(scaledRose).length > rosePixels.length && scaledRose.borderThickness === 39 &&
+            repeatingBorderPlan(rose.repeat_layout, 530, 682, 78).sides[0].matrix[4] === 74,
+            'Rose border scales beyond its native thickness, including its two-cell corner overlap');
+        const thinRose = setBorderThickness(roseFrame, 13);
+        assert(rasterAsset(thinRose).every(([x, y]) => x < 13 || x >= 252 || y < 13 || y >= 328) &&
+            assetThumbnail(roseSource).getAttribute('viewBox') === '0 0 60 80',
+            'Reduced rose thickness and the asset-library frame thumbnail render inside their border bands');
+        rejects(() => resizeBorder(roseFrame, 112, 341), 'Rose frames too short for one complete motif fail explicitly');
+        assert(borderThicknessLimit(resizeBorder(roseFrame, 113, 113)) === 39,
+            'Rose thickness slider limit accounts for a complete motif and the corner overlap');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout, cornerOverlap: 39 }),
+            'Rose corner overlap must be smaller than the motif thickness');
+        rejects(() => validateRepeatLayout({ ...rose.repeat_layout, perimeterRepeat: [0, 0, 77, 39] }, roseSource.viewBox),
+            'Rose perimeter source rectangles must fit the pixel grid');
+        const savedRose = JSON.parse(JSON.stringify(roseFrame));
+        validateAsset(savedRose);
+        assert(JSON.stringify(rasterAsset(savedRose)) === JSON.stringify(rosePixels),
+            'Rose pixels, repeat recipe and thickness survive saving without the catalog');
+        const turnedRose = transformAsset(roseFrame, [0, 1, -1, 0, 341, 0]);
+        const turnedSet = new Set(rasterAsset(turnedRose).map(([x, y]) => `${x},${y}`));
+        assert(rosePixels.every(([x, y]) => turnedSet.has(`${340 - y},${x}`)),
+            'Rose border remains pixel-exact through a quarter-turn layer transform');
+        const mirroredRose = transformAsset(roseFrame, [-1, 0, 0, 1, 265, 0]);
+        const mirroredSet = new Set(rasterAsset(mirroredRose).map(([x, y]) => `${x},${y}`));
+        assert(rosePixels.every(([x, y]) => mirroredSet.has(`${264 - x},${y}`)),
+            'Rose border remains pixel-exact through a horizontal layer mirror');
         assert(source.paths.length > 0 && assetThumbnail(source).querySelectorAll('path').length === source.paths.length,
             'Bundled ornament paths render a safe vector thumbnail');
-        const floral = entries.find(entry => entry.file === 'floral-repeat-border.png');
+        const floral = entries.find(entry => entry.file === 'borders/floral-repeat-border.png');
         const floralSource = await loadAsset(floral.file);
         const floralFrame = resizeBorder(createAsset(floral, floralSource, 40, '#123456'), 240, 320);
         const largerFloral = resizeBorder(floralFrame, 500, 700);
@@ -573,7 +687,7 @@ try {
         validateAsset(reopened);
         assert(JSON.stringify(rasterAsset(reopened)) === JSON.stringify(rasterAsset(placedBorder)),
             'Border extension survives JSON saving without needing its catalog');
-        const wavyEntry = entries.find(item => item.file === 'wavy-border.svg');
+        const wavyEntry = entries.find(item => item.file === 'borders/wavy-border.svg');
         const wavySource = await loadAsset(wavyEntry.file);
         const finalBox = { cx: 150, cy: 250, width: 300, height: 500, angle: 0 };
         let expectedBorder;

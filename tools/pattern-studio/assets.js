@@ -4,7 +4,8 @@ import { validateRepeatLayout, repeatingBorderPlan } from './border-layout.js';
 const identity = [1, 0, 0, 1, 0, 0];
 const loaded = new Map();
 let catalog;
-const safeFile = value => typeof value === 'string' && /^[\w-]+\.(svg|png)$/.test(value);
+// Catalog files live directly in assets/ornaments or in one category folder (borders/, motifs/).
+const safeFile = value => typeof value === 'string' && /^(?:[\w-]+\/)?[\w-]+\.(svg|png)$/.test(value);
 const hex = value => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
 const finite = value => Number.isFinite(value) && Math.abs(value) <= 10000000;
 const matrixValid = matrix => Array.isArray(matrix) && matrix.length === 6 && matrix.every(finite) &&
@@ -254,9 +255,13 @@ export function borderThicknessLimit(asset) {
     const sx = Math.hypot(asset.matrix[0], asset.matrix[1]), sy = Math.hypot(asset.matrix[2], asset.matrix[3]);
     const scale = Math.min(sx, sy);
     const corner = asset.repeatLayout.cornerSize ?? asset.repeatLayout.thickness;
+    const minimumSpan = asset.repeatLayout.perimeterRepeat
+        ? Math.max(2, 1 + (asset.repeatLayout.perimeterRepeat[2] - asset.repeatLayout.cornerOverlap) /
+            asset.repeatLayout.thickness)
+        : 2 * corner / asset.repeatLayout.thickness;
     return Math.max(0, Math.floor(Math.min(1000,
         (asset.repeatLayout.maxThickness ?? 1000) * scale / Math.max(sx, sy),
-        Math.min(asset.width, asset.height) * scale * asset.repeatLayout.thickness / (2 * corner)) + 1e-8));
+        Math.min(asset.width, asset.height) * scale / minimumSpan) + 1e-8));
 }
 
 function borderSegments(base, length, points) {
@@ -322,11 +327,36 @@ export function rasterAsset(asset) {
             ctx.translate(left, top); ctx.scale(width / source[2], height / source[3]);
             ctx.translate(-source[0], -source[1]); paint(); ctx.restore();
         };
+        if (asset.repeatLayout.perimeterRepeat) {
+            const source = asset.repeatLayout.perimeterRepeat;
+            const edge = asset.repeatLayout.innerEdge;
+            for (const side of plan.sides) {
+                ctx.save(); ctx.transform(...side.matrix);
+                for (const start of side.ornaments.starts) {
+                    section([source[0], source[1], source[2], source[3] - edge],
+                        start, 0, side.unit, plan.thickness - edge * plan.scale);
+                }
+                const fill = asset.repeatLayout.gapFill;
+                for (const filler of side.fillers) {
+                    section(fill.source, filler.start, fill.offset * plan.scale,
+                        filler.width, fill.depth * plan.scale);
+                }
+                ctx.restore();
+            }
+            const line = Math.max(1, Math.round(edge * plan.scale));
+            const inset = Math.round(plan.thickness) - line;
+            ctx.fillStyle = asset.color;
+            ctx.fillRect(inset, inset, asset.width - inset * 2, line);
+            ctx.fillRect(inset, asset.height - inset - line, asset.width - inset * 2, line);
+            ctx.fillRect(inset, inset, line, asset.height - inset * 2);
+            ctx.fillRect(asset.width - inset - line, inset, line, asset.height - inset * 2);
+        }
         for (const corner of plan.corners) {
             ctx.save(); ctx.transform(...corner.matrix);
             section(asset.repeatLayout.corner, 0, 0, plan.cornerSize, plan.cornerSize); ctx.restore();
         }
         for (const side of plan.sides) {
+            if (asset.repeatLayout.perimeterRepeat) continue;
             ctx.save(); ctx.transform(...side.matrix);
             if (pixelCanvas && asset.repeatLayout.nativeRepeat && side.ornaments.gap === 0 &&
                 side.ornaments.separators.length === side.ornaments.count + 1) {

@@ -1,7 +1,7 @@
 [
     {
         "name": "Nouveau Corner-Piece",
-        "file": "nouveau-corner.svg",
+        "file": "motifs/nouveau-corner.svg",
         "preview_width": 34,
         "preview_height": 34,
         "tags": ["art nouveau", "nouveau", "floral", "corner", "decorative"],
@@ -9,8 +9,863 @@
         "collection": null
     },
     {
+        "name": "Grape Leaves",
+        "file": "motifs/01_grape_leaves.svg",
+        "preview_width": 31,
+        "preview_height": 62,
+        "tags": ["grape", "leaves", "vine", "fruit", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Rooster and Hen",
+        "file": "motifs/02_rooster_and_hen.svg",
+        "preview_width": 74,
+        "preview_height": 71,
+        "tags": ["rooster", "hen", "chicken", "bird", "farm", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Butterfly Wreath",
+        "file": "motifs/03_butterfly_wreath.svg",
+        "preview_width": 56,
+        "preview_height": 79,
+        "tags": ["butterfly", "wreath", "floral", "insect"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Vine and Bird Border",
+        "file": "motifs/04_vine_bird_border.svg",
+        "preview_width": 175,
+        "preview_height": 34,
+        "tags": ["vine", "bird", "border", "floral", "strip"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Stork and Reeds",
+        "file": "motifs/05_stork_and_reeds.svg",
+        "preview_width": 47,
+        "preview_height": 57,
+        "tags": ["stork", "bird", "reeds", "water", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Willow by the Pond",
+        "file": "motifs/06_willow_by_pond.svg",
+        "preview_width": 34,
+        "preview_height": 47,
+        "tags": ["willow", "tree", "pond", "water", "landscape"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Fruit Basket",
+        "file": "motifs/07_fruit_basket.svg",
+        "preview_width": 35,
+        "preview_height": 54,
+        "tags": ["fruit", "basket", "still life"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Horse",
+        "file": "motifs/08_horse.svg",
+        "preview_width": 71,
+        "preview_height": 68,
+        "tags": ["horse", "animal", "farm"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Butterfly on Flower",
+        "file": "motifs/09_butterfly_on_flower.svg",
+        "preview_width": 27,
+        "preview_height": 32,
+        "tags": ["butterfly", "flower", "floral", "insect"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Woman Feeding Hens",
+        "file": "motifs/10_woman_feeding_hens.svg",
+        "preview_width": 68,
+        "preview_height": 69,
+        "tags": ["woman", "hen", "chicken", "farm", "figure", "people"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Man Feeding Ducks",
+        "file": "motifs/11_man_feeding_ducks.svg",
+        "preview_width": 74,
+        "preview_height": 69,
+        "tags": ["man", "duck", "bird", "farm", "figure", "people"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Butterfly",
+        "file": "motifs/12_butterfly.svg",
+        "preview_width": 33,
+        "preview_height": 32,
+        "tags": ["butterfly", "insect"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Cats on a Cushion",
+        "file": "motifs/13_cats_on_cushion.svg",
+        "preview_width": 75,
+        "preview_height": 62,
+        "tags": ["cat", "cushion", "pet", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Diamond Banner",
+        "file": "motifs/14_diamond_banner.svg",
+        "preview_width": 26,
+        "preview_height": 52,
+        "tags": ["diamond", "banner", "geometric", "decorative"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Butterfly and Lily Border",
+        "file": "motifs/15_butterfly_lily_border.svg",
+        "preview_width": 112,
+        "preview_height": 40,
+        "tags": ["butterfly", "lily", "flower", "border", "floral", "strip"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Hanging Ornament",
+        "file": "motifs/16_hanging_ornament.svg",
+        "preview_width": 27,
+        "preview_height": 59,
+        "tags": ["hanging", "ornament", "decorative", "pendant"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Dog on a Cushion",
+        "file": "motifs/17_dog_on_cushion.svg",
+        "preview_width": 75,
+        "preview_height": 63,
+        "tags": ["dog", "cushion", "pet", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Eagle and Laurel Wreath",
+        "file": "motifs/18_eagle_laurel_wreath.svg",
+        "preview_width": 98,
+        "preview_height": 78,
+        "tags": ["eagle", "bird", "laurel", "wreath", "emblem"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Peacock Fan",
+        "file": "motifs/19_peacock_fan.svg",
+        "preview_width": 66,
+        "preview_height": 52,
+        "tags": ["peacock", "bird", "fan", "feathers"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Standing Peacock",
+        "file": "motifs/20_peacock_standing.svg",
+        "preview_width": 29,
+        "preview_height": 52,
+        "tags": ["peacock", "bird"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Bird and Flower Border",
+        "file": "motifs/21_bird_flower_border.svg",
+        "preview_width": 112,
+        "preview_height": 33,
+        "tags": ["bird", "flower", "border", "floral", "strip"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Braid Border (Top)",
+        "file": "motifs/22_braid_border_top.svg",
+        "preview_width": 68,
+        "preview_height": 12,
+        "tags": ["braid", "border", "top", "strip", "decorative"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Heron Panel",
+        "file": "motifs/23_heron_panel.svg",
+        "preview_width": 46,
+        "preview_height": 141,
+        "tags": ["heron", "bird", "panel", "framed", "water"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Leaf Chain",
+        "file": "motifs/24_leaf_chain.svg",
+        "preview_width": 10,
+        "preview_height": 121,
+        "tags": ["leaf", "leaves", "chain", "vertical", "strip", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Birds Panel",
+        "file": "motifs/25_birds_panel.svg",
+        "preview_width": 46,
+        "preview_height": 141,
+        "tags": ["bird", "panel", "framed"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Braid Border (Bottom)",
+        "file": "motifs/26_braid_border_bottom.svg",
+        "preview_width": 68,
+        "preview_height": 14,
+        "tags": ["braid", "border", "bottom", "strip", "decorative"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Cathedral Madonna",
+        "file": "motifs/s1_cathedral.svg",
+        "preview_width": 57,
+        "preview_height": 57,
+        "tags": ["cathedral", "church", "madonna", "religious", "architecture"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Ornate Cross",
+        "file": "motifs/s1_cross.svg",
+        "preview_width": 33,
+        "preview_height": 46,
+        "tags": ["cross", "religious", "ornate"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Doves",
+        "file": "motifs/s1_doves.svg",
+        "preview_width": 55,
+        "preview_height": 36,
+        "tags": ["dove", "bird", "pair", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Running Greyhound",
+        "file": "motifs/s1_greyhound.svg",
+        "preview_width": 65,
+        "preview_height": 37,
+        "tags": ["greyhound", "dog", "running", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Knight",
+        "file": "motifs/s1_knight.svg",
+        "preview_width": 44,
+        "preview_height": 100,
+        "tags": ["knight", "armor", "figure", "people", "medieval"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Rose Stem A",
+        "file": "motifs/s1_rose_a.svg",
+        "preview_width": 31,
+        "preview_height": 44,
+        "tags": ["rose", "flower", "floral", "stem", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Rose Stem B",
+        "file": "motifs/s1_rose_b.svg",
+        "preview_width": 30,
+        "preview_height": 41,
+        "tags": ["rose", "flower", "floral", "stem", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Braid Band",
+        "file": "motifs/s2_braid.svg",
+        "preview_width": 132,
+        "preview_height": 11,
+        "tags": ["braid", "band", "strip", "border", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Checker Band",
+        "file": "motifs/s2_check.svg",
+        "preview_width": 123,
+        "preview_height": 7,
+        "tags": ["check", "checker", "band", "strip", "border", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Wheat Band",
+        "file": "motifs/s2_wheat_band.svg",
+        "preview_width": 122,
+        "preview_height": 29,
+        "tags": ["wheat", "band", "strip", "border", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Wheat Wreath",
+        "file": "motifs/s2_wheat_wreath.svg",
+        "preview_width": 131,
+        "preview_height": 63,
+        "tags": ["wheat", "wreath", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Floral Vine",
+        "file": "motifs/s3_vine_floral.svg",
+        "preview_width": 40,
+        "preview_height": 165,
+        "tags": ["vine", "flower", "floral", "vertical", "strip", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Leafy Vine",
+        "file": "motifs/s3_vine_leafy.svg",
+        "preview_width": 53,
+        "preview_height": 163,
+        "tags": ["vine", "leaves", "vertical", "strip", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Curling Vine",
+        "file": "motifs/s4_vine.svg",
+        "preview_width": 48,
+        "preview_height": 179,
+        "tags": ["vine", "flower", "floral", "vertical", "strip", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Small Arch",
+        "file": "motifs/s5_arch_small.svg",
+        "preview_width": 7,
+        "preview_height": 9,
+        "tags": ["arch", "geometric", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Butterfly Cross",
+        "file": "motifs/s5_butterfly_cross.svg",
+        "preview_width": 11,
+        "preview_height": 16,
+        "tags": ["butterfly", "cross", "geometric", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Clover Hearts",
+        "file": "motifs/s5_clover_hearts.svg",
+        "preview_width": 14,
+        "preview_height": 14,
+        "tags": ["clover", "hearts", "geometric", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Flower Corner B",
+        "file": "motifs/s5_corner_flower_b.svg",
+        "preview_width": 38,
+        "preview_height": 38,
+        "tags": ["corner", "flower", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Flower Corner C",
+        "file": "motifs/s5_corner_flower_c.svg",
+        "preview_width": 28,
+        "preview_height": 28,
+        "tags": ["corner", "flower", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lattice Corner",
+        "file": "motifs/s5_corner_lattice_a.svg",
+        "preview_width": 32,
+        "preview_height": 32,
+        "tags": ["corner", "lattice", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Scroll Corner",
+        "file": "motifs/s5_corner_scroll_a.svg",
+        "preview_width": 37,
+        "preview_height": 37,
+        "tags": ["corner", "scroll", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Spear Corner A",
+        "file": "motifs/s5_corner_spear_a.svg",
+        "preview_width": 44,
+        "preview_height": 44,
+        "tags": ["corner", "spear", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Spear Corner B",
+        "file": "motifs/s5_corner_spear_b.svg",
+        "preview_width": 42,
+        "preview_height": 42,
+        "tags": ["corner", "spear", "floral", "folk", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Pomegranate Plant",
+        "file": "motifs/s5_pomegranate_plant.svg",
+        "preview_width": 19,
+        "preview_height": 32,
+        "tags": ["pomegranate", "plant", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Scroll Cross",
+        "file": "motifs/s5_scroll_cross.svg",
+        "preview_width": 11,
+        "preview_height": 11,
+        "tags": ["scroll", "cross", "geometric", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tall Tulip",
+        "file": "motifs/s5_tulip_tall.svg",
+        "preview_width": 11,
+        "preview_height": 24,
+        "tags": ["tulip", "flower", "floral", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow A",
+        "file": "motifs/s6_swallow_a.svg",
+        "preview_width": 28,
+        "preview_height": 25,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow B",
+        "file": "motifs/s6_swallow_b.svg",
+        "preview_width": 40,
+        "preview_height": 23,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow C",
+        "file": "motifs/s6_swallow_c.svg",
+        "preview_width": 32,
+        "preview_height": 24,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow D",
+        "file": "motifs/s6_swallow_d.svg",
+        "preview_width": 19,
+        "preview_height": 22,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow E",
+        "file": "motifs/s6_swallow_e.svg",
+        "preview_width": 28,
+        "preview_height": 30,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Swallow F",
+        "file": "motifs/s6_swallow_f.svg",
+        "preview_width": 31,
+        "preview_height": 25,
+        "tags": ["swallow", "bird", "flying"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Small Buck",
+        "file": "motifs/s7_buck_small.svg",
+        "preview_width": 37,
+        "preview_height": 39,
+        "tags": ["buck", "deer", "stag", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Grazing Deer",
+        "file": "motifs/s7_deer_grazing.svg",
+        "preview_width": 61,
+        "preview_height": 52,
+        "tags": ["deer", "stag", "grazing", "animal", "landscape"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tiny Deer",
+        "file": "motifs/s7_deer_tiny.svg",
+        "preview_width": 21,
+        "preview_height": 23,
+        "tags": ["deer", "stag", "small", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Fawn",
+        "file": "motifs/s7_fawn.svg",
+        "preview_width": 32,
+        "preview_height": 32,
+        "tags": ["fawn", "deer", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Leaping Stag",
+        "file": "motifs/s7_stag_leaping.svg",
+        "preview_width": 92,
+        "preview_height": 69,
+        "tags": ["stag", "deer", "leaping", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Resting Stag A",
+        "file": "motifs/s7_stag_lying_brown.svg",
+        "preview_width": 46,
+        "preview_height": 62,
+        "tags": ["stag", "deer", "resting", "lying", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Resting Stag B",
+        "file": "motifs/s7_stag_lying_olive.svg",
+        "preview_width": 64,
+        "preview_height": 66,
+        "tags": ["stag", "deer", "resting", "lying", "animal"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Bird and Flowers",
+        "file": "motifs/s8_bird_flower.svg",
+        "preview_width": 48,
+        "preview_height": 55,
+        "tags": ["bird", "flower", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Bottom Ornament",
+        "file": "motifs/s8_bottom_ornament.svg",
+        "preview_width": 77,
+        "preview_height": 38,
+        "tags": ["bottom", "edge", "floral", "folk", "decorative"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Carnation Pot",
+        "file": "motifs/s8_carnation_pot.svg",
+        "preview_width": 45,
+        "preview_height": 44,
+        "tags": ["carnation", "flower", "pot", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Crown Roof",
+        "file": "motifs/s8_crown_roof.svg",
+        "preview_width": 45,
+        "preview_height": 23,
+        "tags": ["crown", "roof", "edge", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Crowned Hill",
+        "file": "motifs/s8_hill_crown.svg",
+        "preview_width": 35,
+        "preview_height": 20,
+        "tags": ["crown", "hill", "edge", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tulip Hill",
+        "file": "motifs/s8_hill_tulips.svg",
+        "preview_width": 37,
+        "preview_height": 20,
+        "tags": ["tulip", "hill", "edge", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Dome A",
+        "file": "motifs/s8_lace_dome_a.svg",
+        "preview_width": 53,
+        "preview_height": 26,
+        "tags": ["lace", "dome", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Dome B",
+        "file": "motifs/s8_lace_dome_b.svg",
+        "preview_width": 49,
+        "preview_height": 26,
+        "tags": ["lace", "dome", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Side A",
+        "file": "motifs/s8_lace_quarter_a.svg",
+        "preview_width": 34,
+        "preview_height": 69,
+        "tags": ["lace", "side", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Side B",
+        "file": "motifs/s8_lace_quarter_b.svg",
+        "preview_width": 35,
+        "preview_height": 67,
+        "tags": ["lace", "side", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Side C",
+        "file": "motifs/s8_lace_quarter_c.svg",
+        "preview_width": 27,
+        "preview_height": 49,
+        "tags": ["lace", "side", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Lace Side D",
+        "file": "motifs/s8_lace_quarter_d.svg",
+        "preview_width": 26,
+        "preview_height": 49,
+        "tags": ["lace", "side", "half", "doily", "geometric"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Octagon Lily",
+        "file": "motifs/s8_octagon_lily.svg",
+        "preview_width": 53,
+        "preview_height": 57,
+        "tags": ["octagon", "lily", "flower", "framed", "floral"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Octagon Rose",
+        "file": "motifs/s8_octagon_rose.svg",
+        "preview_width": 53,
+        "preview_height": 57,
+        "tags": ["octagon", "rose", "flower", "framed", "floral"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Potted Tulip A",
+        "file": "motifs/s8_potted_tulip_a.svg",
+        "preview_width": 14,
+        "preview_height": 17,
+        "tags": ["tulip", "pot", "flower", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Potted Tulip B",
+        "file": "motifs/s8_potted_tulip_b.svg",
+        "preview_width": 13,
+        "preview_height": 17,
+        "tags": ["tulip", "pot", "flower", "small", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Checker Ring A",
+        "file": "motifs/s8_ring_a.svg",
+        "preview_width": 13,
+        "preview_height": 13,
+        "tags": ["ring", "checker", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Checker Ring B",
+        "file": "motifs/s8_ring_b.svg",
+        "preview_width": 13,
+        "preview_height": 13,
+        "tags": ["ring", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Rosette A",
+        "file": "motifs/s8_rosette_a.svg",
+        "preview_width": 15,
+        "preview_height": 15,
+        "tags": ["rosette", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Rosette B",
+        "file": "motifs/s8_rosette_b.svg",
+        "preview_width": 15,
+        "preview_height": 15,
+        "tags": ["rosette", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Scalloped Floral Frame",
+        "file": "motifs/s8_scallop_frame_floral.svg",
+        "preview_width": 58,
+        "preview_height": 56,
+        "tags": ["scallop", "frame", "framed", "flower", "floral"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Sprig A",
+        "file": "motifs/s8_sprig_a.svg",
+        "preview_width": 17,
+        "preview_height": 12,
+        "tags": ["sprig", "leaf", "botanical", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Sprig B",
+        "file": "motifs/s8_sprig_b.svg",
+        "preview_width": 15,
+        "preview_height": 13,
+        "tags": ["sprig", "leaf", "botanical", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Star A",
+        "file": "motifs/s8_star_a.svg",
+        "preview_width": 11,
+        "preview_height": 11,
+        "tags": ["star", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Star B",
+        "file": "motifs/s8_star_b.svg",
+        "preview_width": 11,
+        "preview_height": 11,
+        "tags": ["star", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Star C",
+        "file": "motifs/s8_star_c.svg",
+        "preview_width": 9,
+        "preview_height": 9,
+        "tags": ["star", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Star D",
+        "file": "motifs/s8_star_d.svg",
+        "preview_width": 11,
+        "preview_height": 11,
+        "tags": ["star", "geometric", "small"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tree with Bird",
+        "file": "motifs/s8_tree_bird.svg",
+        "preview_width": 53,
+        "preview_height": 58,
+        "tags": ["tree", "bird", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tree with Squirrel",
+        "file": "motifs/s8_tree_squirrel.svg",
+        "preview_width": 56,
+        "preview_height": 56,
+        "tags": ["tree", "squirrel", "animal", "botanical"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
+        "name": "Tulip Star Arch",
+        "file": "motifs/s8_tulip_star_arch.svg",
+        "preview_width": 71,
+        "preview_height": 38,
+        "tags": ["tulip", "star", "arch", "edge", "floral", "folk"],
+        "type": "ornament",
+        "collection": null
+    },
+    {
         "name": "Wavy Border",
-        "file": "wavy-border.svg",
+        "file": "borders/wavy-border.svg",
         "preview_width": 34,
         "preview_height": 60,
         "tags": ["border", "decorative", "art nouveau", "nouveau", "rounded"],
@@ -23,8 +878,31 @@
         "collection": null
     },
     {
+        "name": "Rose Repeating Border",
+        "file": "borders/rose-repeat-border.png",
+        "preview_width": 45,
+        "preview_height": 60,
+        "tags": ["border", "rose", "floral", "repeating", "dense", "ornate"],
+        "type": "border",
+        "repeating": true,
+        "collection": null,
+        "repeat_layout": {
+            "thickness": 39,
+            "perimeterRepeat": [0, 0, 76, 39],
+            "cornerOverlap": 2,
+            "motifOverlap": 15,
+            "gapFill": {
+                "source": [32, 0, 32, 38],
+                "offset": 0,
+                "depth": 38,
+                "overlap": 15
+            },
+            "innerEdge": 1
+        }
+    },
+    {
         "name": "Floral Repeating Border",
-        "file": "floral-repeat-border.png",
+        "file": "borders/floral-repeat-border.png",
         "preview_width": 45,
         "preview_height": 60,
         "tags": ["border", "floral", "flower", "swirl", "repeating", "ornate", "geometric"],

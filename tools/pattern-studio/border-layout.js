@@ -3,6 +3,33 @@ const rectValid = rect => Array.isArray(rect) && rect.length === 4 &&
     rect[2] > 0 && rect[3] > 0 && rect.every(value => value <= 10000000);
 
 export function validateRepeatLayout(layout, viewBox = null) {
+    if (layout?.perimeterRepeat !== undefined) {
+        if (!Number.isFinite(layout.thickness) || layout.thickness < 1 || layout.thickness > 500 ||
+            !rectValid(layout.perimeterRepeat) || layout.perimeterRepeat[3] !== layout.thickness ||
+            !Number.isFinite(layout.cornerOverlap) || layout.cornerOverlap < 0 || layout.cornerOverlap >= layout.thickness ||
+            (layout.motifOverlap !== undefined && (!Number.isFinite(layout.motifOverlap) ||
+                layout.motifOverlap < 0 || layout.motifOverlap >= layout.perimeterRepeat[2])) ||
+            (layout.gapFill !== undefined && (!layout.gapFill || !rectValid(layout.gapFill.source) ||
+                !Number.isFinite(layout.gapFill.offset) || layout.gapFill.offset < 0 ||
+                !Number.isFinite(layout.gapFill.depth) || layout.gapFill.depth <= 0 ||
+                layout.gapFill.offset + layout.gapFill.depth > layout.thickness - layout.innerEdge ||
+                !Number.isFinite(layout.gapFill.overlap) || layout.gapFill.overlap < 0 ||
+                layout.gapFill.overlap >= layout.gapFill.source[2] / layout.gapFill.source[3] * layout.gapFill.depth)) ||
+            !Number.isInteger(layout.innerEdge) || layout.innerEdge < 1 || layout.innerEdge >= layout.thickness ||
+            (layout.maxThickness !== undefined && (!Number.isInteger(layout.maxThickness) ||
+                layout.maxThickness < 1 || layout.maxThickness > 500))) {
+            throw new Error('Invalid perimeter repeating border recipe.');
+        }
+        if (viewBox) {
+            const [x, y, w, h] = viewBox;
+            const rectangles = [layout.perimeterRepeat, ...(layout.gapFill ? [layout.gapFill.source] : [])];
+            if (rectangles.some(rect => rect[0] < x || rect[1] < y ||
+                rect[0] + rect[2] > x + w || rect[1] + rect[3] > y + h)) {
+                throw new Error('Perimeter repeat must fit inside the source viewBox.');
+            }
+        }
+        return;
+    }
     if (!layout || !Number.isFinite(layout.thickness) || layout.thickness < 1 || layout.thickness > 500 ||
         (layout.maxThickness !== undefined && (!Number.isInteger(layout.maxThickness) ||
             layout.maxThickness < 1 || layout.maxThickness > 500)) ||
@@ -115,6 +142,44 @@ export function sequenceSpacing(length, unit, separator, minGap, maxGap, dense =
 export function repeatingBorderPlan(layout, width, height, thickness) {
     validateRepeatLayout(layout);
     const scale = thickness / layout.thickness;
+    if (layout.perimeterRepeat) {
+        const inset = thickness - layout.cornerOverlap * scale;
+        const unit = layout.perimeterRepeat[2] * scale;
+        if (![width, height, thickness].every(Number.isFinite) || thickness <= 0 ||
+            width < Math.max(thickness * 2, inset + unit) || height < Math.max(thickness * 2, inset + unit)) {
+            throw new Error('Border frame must fit a complete motif on every side. Reduce thickness or enlarge the frame.');
+        }
+        const sides = [
+            { length: width - inset, matrix: [1, 0, 0, 1, inset, 0] },
+            { length: height - inset, matrix: [0, 1, -1, 0, width, inset] },
+            { length: width - inset, matrix: [-1, 0, 0, -1, width - inset, height] },
+            { length: height - inset, matrix: [0, -1, 1, 0, 0, height - inset] },
+        ];
+        for (const side of sides) {
+            const overlap = (layout.motifOverlap ?? 0) * scale;
+            const count = Math.floor((side.length - overlap + 1e-8) / (unit - overlap));
+            if (count > 8192) throw new Error('Border has too many ornamental repeats. Increase thickness.');
+            const gap = count > 1 ? (side.length - count * unit) / (count - 1) : 0;
+            side.unit = unit;
+            side.ornaments = { count, gap, starts: Array.from({ length: count }, (_, i) =>
+                count === 1 ? (side.length - unit) / 2 : i * (unit + gap)) };
+            side.fillers = [];
+            if (layout.gapFill) {
+                const fill = layout.gapFill;
+                const fillUnit = fill.source[2] / fill.source[3] * fill.depth * scale;
+                const ends = [0, ...side.ornaments.starts.map(start => start + unit)];
+                const starts = [...side.ornaments.starts, side.length];
+                for (let i = 0; i < starts.length; i++) {
+                    if (starts[i] - ends[i] <= 1e-8) continue;
+                    const left = Math.max(0, ends[i] - fill.overlap * scale);
+                    const right = Math.min(side.length, starts[i] + fill.overlap * scale);
+                    const spacing = repeatSpacing(right - left, fillUnit, 0, 0);
+                    for (const start of spacing.starts) side.fillers.push({ start: left + start, width: fillUnit });
+                }
+            }
+        }
+        return { scale, thickness, cornerSize: thickness, corners: [], sides };
+    }
     const cornerSize = (layout.cornerSize ?? layout.thickness) * scale;
     if (![width, height, thickness].every(Number.isFinite) || width < 1 || height < 1 ||
         thickness <= 0 || thickness > 10000000 || width < cornerSize * 2 || height < cornerSize * 2) {

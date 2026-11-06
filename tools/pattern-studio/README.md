@@ -3,6 +3,8 @@
 - **Asset Library** opens a searchable SVG decoration catalog with Ornaments
   and Borders tabs. Entries come from [the asset manifest](assets/ornaments/index.json):
   `name`, `file`, `tags`, `type`, `collection`, `preview_width`, `preview_height`.
+  `file` is relative to `assets/ornaments/`; borders live in `borders/` and
+  ornaments in `motifs/` (one folder level, e.g. `motifs/nouveau-corner.svg`).
   Preview dimensions are screen pixels. Non-null collections appear as folders;
   opening one shows its assets with a beige Back row. Search matches name/tags
   across all collections in the active tab (all search words must match).
@@ -28,7 +30,7 @@
     repeating entries without a recipe remain ordinary scalable SVG assets.
   - **Floral Repeating Border** uses the exact one-pixel-per-stitch references
     in `ref/border.png` (40 x 70) and `ref/border-edge.png` (44 x 67).
-    `assets/ornaments/floral-repeat-border.png` is a lossless transparent atlas
+    `assets/ornaments/borders/floral-repeat-border.png` is a lossless transparent atlas
     containing a complete three-flower stem cluster, a scroll diamond,
     a corner and two geometric strips. No SVG tracing or smoothing is used.
     All supplied corner cells are retained; only the two missing columns at
@@ -60,6 +62,23 @@
     asks the user to reduce thickness or enlarge the frame instead of overlapping
     corners. Thickness, used paths and layout recipes persist through Undo,
     duplication, recoloring, saving, JSON backups and rasterization.
+  - **Rose Repeating Border** uses the pixel-perfect 76 x 39 motif in
+    `ref/border-motif.webp`, converted losslessly to the transparent
+    `assets/ornaments/borders/rose-repeat-border.png` (flipped top-bottom so the inner
+    line faces the frame's center). Native thickness is **39 stitch cells**.
+    It packs as many complete motifs as each side can hold, distributing
+    leftover length between them without stretching the roses. Neighboring
+    motifs may overlap by up to **15 cells** at native size to fit another rose;
+    this limit scales with thickness. The border also uses complete leaf-only
+    ornaments from the same pixel source to fill
+    spare space between roses or beside a single centered rose. Leaves keep
+    their native proportions and may overlap neighboring motifs by up to
+    15 source cells; gaps too small for a complete leaf remain unfilled.
+    Adjacent sides turn clockwise with a **2-cell overlap** at native size; overlap and
+    decorative pieces scale with thickness. The innermost line forms a closed
+    rectangle even when gaps are added. There is no native-thickness cap.
+    At 39 cells thick, each frame dimension must be at least 113 cells to fit
+    a complete motif and the turn; smaller frames require thinner borders.
   - `repeat_layout` is a configurable recipe, not automatic image recognition:
     - `thickness`: source border thickness in stitch cells (1-500).
     - Optional `maxThickness`: maximum physical border thickness in cells.
@@ -70,6 +89,22 @@
       directly whenever no extra gap is needed, preserving every reference
       cell and the original edge phase. With added gaps, the renderer uses
       the separated motifs and geometric strips instead.
+    - Alternative perimeter recipe: `perimeterRepeat` is a complete motif
+      `[x,y,width,height]`, whose height equals `thickness`. `cornerOverlap`
+      controls the shared depth at each turn, and `innerEdge` is the number
+      of innermost source rows to replace with a continuous rectangular line.
+      This recipe does not need `corner`, `edges` or a separate ornament atlas.
+      Complete motifs anchor both ends of a side; leftover space is distributed
+      between them (a single motif is centered). The thickness limit accounts
+      for both border depth and the minimum span needed for a complete motif.
+      Optional `motifOverlap` allows neighboring complete motifs to overlap by
+      up to that many source cells (default zero), scaled with thickness.
+      The renderer packs the maximum repeat count within that limit and shares
+      the overlap evenly, without clipping or shrinking motifs.
+      Optional `gapFill` (`source`, `offset`, `depth`, `overlap`) repeats a
+      secondary ornament inside leftover side gaps, permitting bounded overlap
+      into the neighboring motifs. Only complete ornaments are placed; all
+      dimensions scale with thickness and stay inside the side's extent.
     - `corner`: `[x,y,width,height]` inside the source viewBox; rotated to make four
       corners. Optional `cornerSize` reserves additional length along each edge
       for complete corner flowers (default: `thickness`, maximum 1000 source
@@ -370,7 +405,8 @@ tool options, layers, and a magnifier button for zoom controls.
     including descendants of selected folders. Mixed locks show a mixed state;
     clicking sets the lock for all. Mixed opacity/blend values show the active
     layer's value (or the first contained pixel layer for an active folder),
-    with a mixed-value tooltip. Eye buttons still toggle only their own row.
+    with a mixed-value tooltip. Eye buttons toggle only their own row and keep
+    the current tool and layer selection unchanged.
     Selection is preserved in saves/backups and restored with action undo/redo.
   - **Merge Layers**, right of the lock buttons, combines two or more selected
     layers into the top-most selected layer, which keeps its name, position in

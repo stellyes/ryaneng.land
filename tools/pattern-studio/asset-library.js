@@ -98,7 +98,9 @@ export function createAssetLibrary({ add, getColor, canAdd, getProjectSize = () 
         $('asset-border-height').readOnly = Boolean(projectSize);
         $('asset-border-width').value = projectSize?.width ?? asset.width;
         $('asset-border-height').value = projectSize?.height ?? asset.height;
-        $('asset-size-help').textContent = asset.repeatLayout
+        $('asset-size-help').textContent = asset.repeatLayout?.perimeterRepeat
+            ? `Native thickness: ${asset.repeatLayout.thickness} cells. Each side packs complete motifs, distributing leftover space between them.${asset.repeatLayout.motifOverlap ? ` Neighboring motifs may overlap by up to ${asset.repeatLayout.motifOverlap} cells at native size to fit more repeats.` : ''}${asset.repeatLayout.gapFill ? ' Spare space is filled with complete leaf ornaments wherever they fit, including at the ends of short sides.' : ''} Corners overlap by ${asset.repeatLayout.cornerOverlap} cells at native size; overlap scales with thickness. The inner border stays continuous. The frame initially fits the project edges. Resize to change repeat counts, or Shift-drag a corner to scale the whole design. Background is preview-only.`
+            : asset.repeatLayout
             ? `Border thickness scales corners, ornaments and edge strips together.${asset.repeatLayout.maxThickness ? ` Maximum ${asset.repeatLayout.maxThickness} cells; pixel artwork uses nearest-neighbor scaling.` : ''} Preview dimensions match the open project; the frame initially fits its edges. Extra length changes symmetric gaps and repeat counts, not ornament size. After adding, resize freely or Shift-drag to scale up to the thickness limit. Geometric strips repeat independently.`
             : asset.borderBase
             ? 'Size sets initial dimensions. Decoration always scales to fit the original SVG proportions; extra width or height extends at the breakpoints. Preview size does not limit later detail. Shift-drag a corner to keep proportions. Background is preview-only.'
