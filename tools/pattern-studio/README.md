@@ -1,5 +1,9 @@
 # Pattern Studio (local demo)
 
+Cloud asset infrastructure can be provisioned separately using the
+[asset deployment guide](../../services/pattern-studio-assets/README.md).
+Provisioning does not migrate assets or change this local library.
+
 - **Asset Library** opens a searchable SVG decoration catalog with Ornaments
   and Borders tabs. Entries come from [the asset manifest](assets/ornaments/index.json):
   `name`, `file`, `tags`, `type`, `collection`, `preview_width`, `preview_height`.

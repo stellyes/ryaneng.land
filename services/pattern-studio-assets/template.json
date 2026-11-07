@@ -1,0 +1,238 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private Pattern Studio asset storage with CloudFront delivery. Does not upload assets or change the frontend.",
+  "Parameters": {
+    "SiteOrigin": {
+      "Type": "String",
+      "Default": "https://ryaneng.land",
+      "AllowedPattern": "^https://[A-Za-z0-9.-]+(:[0-9]+)?$",
+      "Description": "Exact HTTPS website origin allowed to read assets; no trailing slash."
+    },
+    "PriceClass": {
+      "Type": "String",
+      "Default": "PriceClass_100",
+      "AllowedValues": ["PriceClass_100", "PriceClass_200", "PriceClass_All"],
+      "Description": "PriceClass_100 uses North American and European edge locations; other visitors can still connect."
+    }
+  },
+  "Resources": {
+    "AssetBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [{"ObjectOwnership": "BucketOwnerEnforced"}]
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [{
+            "ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}
+          }]
+        },
+        "VersioningConfiguration": {"Status": "Enabled"},
+        "Tags": [{"Key": "Application", "Value": "pattern-studio-assets"}]
+      }
+    },
+    "OriginAccessControl": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": {"Fn::Sub": "${AWS::StackName}-oac"},
+          "Description": "Signed CloudFront access to the private asset bucket",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+    "AssetCachePolicy": {
+      "Type": "AWS::CloudFront::CachePolicy",
+      "Properties": {
+        "CachePolicyConfig": {
+          "Name": {"Fn::Sub": "${AWS::StackName}-assets"},
+          "Comment": "Honor object Cache-Control; only hash-addressed objects should have long lifetimes.",
+          "MinTTL": 0,
+          "DefaultTTL": 0,
+          "MaxTTL": 31536000,
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingGzip": true,
+            "EnableAcceptEncodingBrotli": true,
+            "CookiesConfig": {"CookieBehavior": "none"},
+            "HeadersConfig": {"HeaderBehavior": "none"},
+            "QueryStringsConfig": {"QueryStringBehavior": "none"}
+          }
+        }
+      }
+    },
+    "RevisionCachePolicy": {
+      "Type": "AWS::CloudFront::CachePolicy",
+      "Properties": {
+        "CachePolicyConfig": {
+          "Name": {"Fn::Sub": "${AWS::StackName}-revision"},
+          "Comment": "Always revalidate latest.json, even if uploaded with incorrect long-lived cache metadata.",
+          "MinTTL": 0,
+          "DefaultTTL": 0,
+          "MaxTTL": 0,
+          "ParametersInCacheKeyAndForwardedToOrigin": {
+            "EnableAcceptEncodingGzip": false,
+            "EnableAcceptEncodingBrotli": false,
+            "CookiesConfig": {"CookieBehavior": "none"},
+            "HeadersConfig": {"HeaderBehavior": "none"},
+            "QueryStringsConfig": {"QueryStringBehavior": "none"}
+          }
+        }
+      }
+    },
+    "AssetResponseHeaders": {
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Name": {"Fn::Sub": "${AWS::StackName}-headers"},
+          "CorsConfig": {
+            "AccessControlAllowCredentials": false,
+            "AccessControlAllowHeaders": {"Items": ["If-None-Match", "If-Modified-Since"]},
+            "AccessControlAllowMethods": {"Items": ["GET", "HEAD", "OPTIONS"]},
+            "AccessControlAllowOrigins": {"Items": [{"Ref": "SiteOrigin"}]},
+            "AccessControlExposeHeaders": {"Items": ["ETag", "Last-Modified"]},
+            "AccessControlMaxAgeSec": 86400,
+            "OriginOverride": true
+          },
+          "SecurityHeadersConfig": {
+            "ContentTypeOptions": {"Override": true},
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "Override": true
+            }
+          }
+        }
+      }
+    },
+    "RevisionResponseHeaders": {
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Name": {"Fn::Sub": "${AWS::StackName}-revision-headers"},
+          "CorsConfig": {
+            "AccessControlAllowCredentials": false,
+            "AccessControlAllowHeaders": {"Items": ["If-None-Match", "If-Modified-Since"]},
+            "AccessControlAllowMethods": {"Items": ["GET", "HEAD", "OPTIONS"]},
+            "AccessControlAllowOrigins": {"Items": [{"Ref": "SiteOrigin"}]},
+            "AccessControlExposeHeaders": {"Items": ["ETag", "Last-Modified"]},
+            "AccessControlMaxAgeSec": 86400,
+            "OriginOverride": true
+          },
+          "CustomHeadersConfig": {
+            "Items": [{
+              "Header": "Cache-Control",
+              "Value": "no-cache",
+              "Override": true
+            }]
+          },
+          "SecurityHeadersConfig": {
+            "ContentTypeOptions": {"Override": true},
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "Override": true
+            }
+          }
+        }
+      }
+    },
+    "Distribution": {
+      "Type": "AWS::CloudFront::Distribution",
+      "Properties": {
+        "DistributionConfig": {
+          "Enabled": true,
+          "Comment": {"Fn::Sub": "Pattern Studio asset library (${AWS::StackName})"},
+          "HttpVersion": "http2and3",
+          "IPV6Enabled": true,
+          "PriceClass": {"Ref": "PriceClass"},
+          "ViewerCertificate": {"CloudFrontDefaultCertificate": true},
+          "Origins": [{
+            "Id": "AssetBucket",
+            "DomainName": {"Fn::GetAtt": ["AssetBucket", "RegionalDomainName"]},
+            "OriginAccessControlId": {"Ref": "OriginAccessControl"},
+            "S3OriginConfig": {"OriginAccessIdentity": ""}
+          }],
+          "DefaultCacheBehavior": {
+            "TargetOriginId": "AssetBucket",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": ["GET", "HEAD"],
+            "CachedMethods": ["GET", "HEAD"],
+            "Compress": true,
+            "CachePolicyId": {"Ref": "AssetCachePolicy"},
+            "ResponseHeadersPolicyId": {"Ref": "AssetResponseHeaders"}
+          },
+          "CacheBehaviors": [{
+            "PathPattern": "latest.json",
+            "TargetOriginId": "AssetBucket",
+            "ViewerProtocolPolicy": "redirect-to-https",
+            "AllowedMethods": ["GET", "HEAD"],
+            "CachedMethods": ["GET", "HEAD"],
+            "Compress": true,
+            "CachePolicyId": {"Ref": "RevisionCachePolicy"},
+            "ResponseHeadersPolicyId": {"Ref": "RevisionResponseHeaders"}
+          }],
+          "CustomErrorResponses": [
+            {"ErrorCode": 403, "ErrorCachingMinTTL": 0},
+            {"ErrorCode": 404, "ErrorCachingMinTTL": 0}
+          ]
+        },
+        "Tags": [{"Key": "Application", "Value": "pattern-studio-assets"}]
+      }
+    },
+    "AssetBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {"Ref": "AssetBucket"},
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowDistributionRead",
+              "Effect": "Allow",
+              "Principal": {"Service": "cloudfront.amazonaws.com"},
+              "Action": "s3:GetObject",
+              "Resource": {"Fn::Sub": "${AssetBucket.Arn}/*"},
+              "Condition": {
+                "StringEquals": {
+                  "AWS:SourceArn": {"Fn::Sub": "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"}
+                }
+              }
+            },
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {"Fn::GetAtt": ["AssetBucket", "Arn"]},
+                {"Fn::Sub": "${AssetBucket.Arn}/*"}
+              ],
+              "Condition": {"Bool": {"aws:SecureTransport": "false"}}
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "BucketName": {
+      "Description": "Private upload destination for the later asset migration",
+      "Value": {"Ref": "AssetBucket"}
+    },
+    "DistributionId": {"Value": {"Ref": "Distribution"}},
+    "AssetBaseUrl": {
+      "Value": {"Fn::Sub": "https://${Distribution.DomainName}"}
+    },
+    "LatestManifestUrl": {
+      "Value": {"Fn::Sub": "https://${Distribution.DomainName}/latest.json"}
+    }
+  }
+}
