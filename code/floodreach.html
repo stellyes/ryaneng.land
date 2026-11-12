@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>FloodReach | Release Preview</title>
+    <meta name="description" content="A release preview of FloodReach, bringing river observations and official forecasts into one local view for Northwest Washington.">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Ryan England">
+    <meta property="og:title" content="FloodReach | Release Preview">
+    <meta property="og:url" content="https://ryaneng.land/code/floodreach.html">
+    <meta property="og:image" content="https://ryaneng.land/assets/img/floodreach-washington.png">
+    <meta property="og:image:alt" content="FloodReach Washington monitoring dashboard with station map and watershed overview">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="FloodReach | Release Preview">
+    <meta name="twitter:image" content="https://ryaneng.land/assets/img/floodreach-washington.png">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../assets/css/scale.css">
+    <link rel="icon" href="../favicon.ico" type="image/x-icon">
+  </head>
+  <body>
+    <nav class="side-nav">
+      <a href="../index.html">
+        <img class="side-nav-deco" src="../assets/img/deco-left.svg" alt="Watching over us...">
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="side-nav-list">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <ul class="side-nav-list" id="side-nav-list">
+        <li class="home-nav-item"><a href="../index.html">Home</a></li>
+        <li><a href="../art.html">The Arts</a></li>
+        <li><a href="../code.html">The Code</a></li>
+        <li><a href="../blog.html">The Blog</a></li>
+        <li><a href="../about.html">About</a></li>
+        <li><a href="../contact.html">Contact</a></li>
+      </ul>
+    </nav>
+    <main class="floodreach-main">
+      <article class="page-content floodreach-preview">
+        <a class="preview-back-link" href="../code.html">&lt;- Back to Code</a>
+
+        <section class="preview-hero" aria-labelledby="preview-title">
+          <span class="preview-kicker">Local river monitoring · Washington</span>
+          <h1 class="preview-title" id="preview-title">Your watershed,<br><span>in view.</span></h1>
+          <p class="preview-lede">FloodReach brings station observations, official forecasts and watershed context together in one map-first view. The first monitoring region covers Whatcom, Skagit and Snohomish counties.</p>
+          <div class="preview-actions">
+            <a class="preview-action primary" href="https://wa.floodreach.com/" target="_blank" rel="noopener noreferrer">Open the Washington dashboard ↗</a>
+            <a class="preview-action" href="https://floodreach.com/" target="_blank" rel="noopener noreferrer">Visit FloodReach home</a>
+          </div>
+        </section>
+
+        <div class="preview-metrics" aria-label="Washington coverage">
+          <div class="preview-metric"><strong>3 counties</strong><span>Northwest Washington</span></div>
+          <div class="preview-metric"><strong>USGS · NWS · NOAA</strong><span>Public source data, together</span></div>
+          <div class="preview-metric"><strong>Station-first</strong><span>Readings and forecasts, not risk scores</span></div>
+        </div>
+
+        <section class="preview-screens" aria-labelledby="preview-screens-title">
+          <div class="preview-section-heading">
+            <div>
+              <span class="preview-kicker">A closer look</span>
+              <h2 id="preview-screens-title">One region. A clearer picture.</h2>
+            </div>
+            <p>Explore the regional home and the Washington monitoring dashboard.</p>
+          </div>
+          <div class="preview-gallery">
+            <a class="preview-shot" href="https://wa.floodreach.com/" target="_blank" rel="noopener noreferrer">
+              <img src="../assets/img/floodreach-washington.png" alt="Washington dashboard showing monitoring stations across the Northwest Washington map, overview cards and forecast timeline" loading="lazy">
+              <span class="preview-shot-caption"><strong>Washington dashboard</strong><span>Map · gauges · forecast outlook</span></span>
+            </a>
+            <a class="preview-shot" href="https://floodreach.com/" target="_blank" rel="noopener noreferrer">
+              <img src="../assets/img/floodreach-home.png" alt="FloodReach home showing Washington monitoring availability and Oregon and British Columbia coverage in development" loading="lazy">
+              <span class="preview-shot-caption"><strong>Regional home</strong><span>Washington available · more regions ahead</span></span>
+            </a>
+          </div>
+        </section>
+
+        <section class="preview-features" aria-label="Product highlights">
+          <article class="preview-feature">
+            <span>01 · SEE THE COVERAGE</span>
+            <h3>A map grounded in stations</h3>
+            <p>Find monitoring sites across the covered counties. Neutral markers show station locations, not flood risk.</p>
+          </article>
+          <article class="preview-feature">
+            <span>02 · FOLLOW THE DATA</span>
+            <h3>Observations and outlooks</h3>
+            <p>Review available readings, NWS forecast horizons and source freshness, with missing data called out.</p>
+          </article>
+          <article class="preview-feature">
+            <span>03 · MAKE IT YOURS</span>
+            <h3>Keep useful stations close</h3>
+            <p>Search gauges, adjust the map view and save station highlights on your device.</p>
+          </article>
+        </section>
+
+        <aside class="preview-caution" aria-label="Important service limitation">
+          <span aria-hidden="true">△</span>
+          <p><strong>Not an emergency notification system.</strong> Readings are provisional and may be delayed or unavailable. FloodReach does not calculate flood-risk scores or replace official alerts. Follow National Weather Service and local emergency guidance.</p>
+        </aside>
+
+        <footer class="preview-footer">
+          <span>Initial coverage: Whatcom · Skagit · Snohomish</span>
+          <a href="https://floodreach.com/" target="_blank" rel="noopener noreferrer">floodreach.com ↗</a>
+        </footer>
+      </article>
+    </main>
+    <script src="../nav.js"></script>
+  </body>
+</html>
