@@ -186,7 +186,7 @@ Provisioning does not migrate assets or change this local library.
   one undoable step; every selected layer must have its position unlocked.
   Empty layers show no canvas selection until something is painted on them.
   **Move** remains the separate viewport-pan tool; Space-drag pans with Cursor.
-- **Ctrl/Cmd+I**, or **Invert colors** in the toolbar, inverts RGB colors on all
+- **Ctrl/Cmd+I** inverts RGB colors on all
   selected layers and folder contents, including off-canvas pixels. Transparency,
   opacity and blend modes remain unchanged; text stays editable with an inverted
   text color. Color/full locks block the whole action. Undo restores the colors.
@@ -240,12 +240,17 @@ tool options, layers, and a magnifier button for zoom controls.
 - Line placements use small, hollow endpoint handles so the final pixels remain
   visible. The line itself has no highlight; its invisible drag area and the
   endpoints' larger invisible hit areas remain available for moving/adjusting.
-- The icon toolbar is divided into Drawing (Paint, Bucket fill, Eraser, Line,
-  Shapes), Color adjustments (Dodge, Burn, Sponge), Text,
+- The icon toolbar uses one square dropdown per group: Drawing (Cursor, Paint,
+  Bucket fill, Eraser, Line, Shapes), Color adjustments (Dodge, Burn, Sponge),
+  SVG (Text and Asset Library),
   Canvas (Move, Color sampler, Grid size, Crop), Selection/clipboard
   (Select, Copy, Paste, Cut), and History (Undo, Redo) groups.
-  Hover or keyboard-focus an icon for its plain-text tooltip; each button also
-  has an accessible name. Erase block has been removed.
+  Hover or keyboard-focus a group for tool names and descriptions, then open it
+  to choose a tool. Individual entries also show descriptions and tooltips.
+  Arrow keys navigate entries; Escape closes the dropdown and returns focus.
+  The selected tool highlights its group. The toolbar stays on one row and
+  scrolls horizontally when space is limited; dropdowns are not clipped by it.
+  Invert remains available through its keyboard shortcut, not a toolbar button.
 - **Text** creates a separate editable text layer, marked **T** in the layer
   list. If the active layer is already text, the tool reopens its options;
   **New text layer** creates another. Tool options contain a multiline text
@@ -541,7 +546,7 @@ tool options, layers, and a magnifier button for zoom controls.
   horizontal slice with the most painted cells. Click a row to open it; its ⋮
   menu offers Download and Delete. Try a sample and Import project backup are
   below the list.
-- The top-right File dropdown contains Back to projects, Projects, Download project, and Export
+- The top-right File dropdown contains Back to projects, Download project, and Export
   pattern. It is hidden until a project is open. Selecting an action,
   clicking/tapping outside, or pressing Escape closes the dropdown.
   Back to projects finalizes pending placements and saves before returning to
@@ -806,15 +811,32 @@ output, settings validation, and aspect-locked sizing.
 
 ## Yarn match
 
-The **Yarn** menu beside Palette previews the pattern in one of the 827 yarn
-lines from [yarn-palettes.json](yarn-palettes.json) (loaded on first open). It
-is view-only: project cells, the palette and saved data keep their original
-colors, and Paint still uses the original color you select. Palette swatches
-show the original color (upper left) and its yarn (lower right) while
-previewing, and a table lists each color's yarn and score. Choose
-**Original colors** to return. Opening a project resets the preview.
+The **Yarn** button beside Palette opens a modal dialog using
+[yarn-palettes.json](yarn-palettes.json) (loaded on first open). Three sections
+show the original palette and hex values, a **Custom Palette** across brands,
+and ranked brand product lines with an all-lines selector. Yarn details show
+available line names, swatches, hex values, and match scores; the catalog does
+not include shade names, weights, fibers, or prices. Selecting a custom palette
+or product line shows an original-hex-to-yarn-hex translation key underneath.
 
-The menu ranks every line for the current project and shows the top five. A
+Selections are drafts until **Confirm** applies a reversible display substitution
+in one undoable, autosaved edit. **Cancel** or Escape leaves the selection unchanged.
+Project cells, original palette hex values, hidden/off-canvas content, editable
+text/assets, and the reference image are never recolored by palette switching.
+Every line is matched against the same original colors, not the previous line's
+substitutions. **Keep original colors** turns substitution off. The selected line
+and explicit yarn additions survive saving, backups, and reopening. If the catalog
+cannot be loaded, the editor reports the error and displays preserved source colors.
+
+While a yarn palette is active, **Add yarn color** replaces the arbitrary color
+input with a catalog shade picker. Choose colors from the active product line or
+any other line; custom palettes can use all lines. Added yarn shades are stored as
+their actual hex values with product-line provenance, and stay that shade when
+switching palettes or returning to original colors. Sampling the reference while
+using a yarn palette chooses its closest catalog shade rather than adding an
+arbitrary hex. Palette additions and palette switching support undo/redo.
+
+The dialog ranks every line for the current project and shows the top five. A
 line's score works like this:
 
 - **Per-color score.** Each color gets `100 * max(0, 1 - d / 0.3)`, where `d`
@@ -837,18 +859,19 @@ line's score works like this:
 - **Usable colors.** A color is usable when its own yarn scores 70 or more.
   Ties are broken by more usable colors, then larger lines.
 
-Above the top matches, a **Custom mix** builds a palette that ignores brand
+Alongside the top matches, a **Custom Palette** builds a palette that ignores brand
 lines: each color gets the closest yarn from all ~28,000 yarns, with the same
 scoring and weighting. Distinct colors still get distinct yarns (each color
 considers its 8 nearest yarns, heaviest colors pick first), and identical hexes
-sold by different lines count once. Selecting it previews the mix, and the color
+sold by different lines count once. Selecting it displays the mix, and the color
 table lists each yarn's brand line and hex as a shopping list. Because it can
 pick from every line, it normally scores at least as high as the best single
 line. The trade-off is buying from several brands, which can mean different
 weights and fibers.
 
-Export can optionally render the previewed yarn colors (**Use previewed yarn
-colors** in the export dialog); otherwise it uses the original colors. The
+Exports can use the substitution through **Use previewed yarn colors**, or retain
+source colors when unchecked. Import-time yarn previews use the same reversible
+substitution. The
 scoring functions (`colorUsage`, `prepareYarnLines`, `matchYarnLine`,
 `rankYarnLines`, `matchCustomMix`, `closestYarn`) live in [palette.js](palette.js).
 Ranking all lines takes about 30 ms for 16 colors and about 125 ms for the

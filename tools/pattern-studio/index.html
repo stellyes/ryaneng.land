@@ -48,7 +48,6 @@
         <summary id="file-toggle">File</summary>
         <div class="file-actions">
         <button id="back-projects" type="button">Back to projects</button>
-        <button id="projects" type="button">Projects</button>
         <button id="backup" type="button" disabled>Download project</button>
         <button id="export" type="button" disabled class="primary">Export pattern</button>
         </div>
@@ -59,99 +58,97 @@
       <div class="tool-group" role="group" aria-label="Drawing tools">
         <span class="tool-control">
           <button class="icon-button" data-tool="cursor" aria-label="Cursor" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 3 14 10-7 1-3 7z"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Cursor - move active layer</span>
+          <span class="tool-tooltip" aria-hidden="true">Move the selected layer or group of layers.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="paint" aria-label="Paint" aria-pressed="true" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l1-6L16 3a2 2 0 0 1 5 5L10 19zM5 14l5 5"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Paint</span>
+          <span class="tool-tooltip" aria-hidden="true">Brush individual cells or drag to paint a stroke.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="fill" aria-label="Bucket fill" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 7-7 9 9-7 7a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3ZM7 2l7 7M4 13h15M20 16s-2 3-2 4a2 2 0 0 0 4 0c0-1-2-4-2-4Z"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Bucket fill</span>
+          <span class="tool-tooltip" aria-hidden="true">Fill a connected area with the selected color.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="erase" aria-label="Eraser" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 13 10-10a2 2 0 0 1 3 0l5 5a2 2 0 0 1 0 3L11 21H8l-5-5a2 2 0 0 1 0-3ZM8 8l8 8M11 21h10"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Eraser</span>
+          <span class="tool-tooltip" aria-hidden="true">Remove painted cells with an adjustable brush.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="line" aria-label="Line" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 19 14-14"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="5" r="2"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Line</span>
+          <span class="tool-tooltip" aria-hidden="true">Draw and adjust a straight pixel line.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="shape" aria-label="Shapes" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="11" height="11"/><circle cx="16" cy="16" r="6"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Shapes</span>
+          <span class="tool-tooltip" aria-hidden="true">Place rectangles, ellipses, triangles or stars.</span>
         </span>
       </div>
       <div class="tool-group" role="group" aria-label="Color adjustment tools">
         <span class="tool-control">
           <button class="icon-button" data-tool="dodge" aria-label="Dodge" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="5"/><path d="m12 12 8 9M9 1v2M2 8H0M3 2l2 2M15 2l-2 2"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Dodge — lighten</span>
+          <span class="tool-tooltip" aria-hidden="true">Lighten existing painted pixels.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="burn" aria-label="Burn" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 6 7 8 7 13a7 7 0 0 1-14 0c0-3 2-6 4-8 0 4 2 5 3 6 2-3 2-6 0-11Z"/><path d="M10 17h4"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Burn — darken</span>
+          <span class="tool-tooltip" aria-hidden="true">Darken existing painted pixels.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="sponge" aria-label="Sponge" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5c4-3 7 1 11-1 3-2 6 0 7 2v12c-3 3-6-1-10 1-4 2-7 0-8-2Z"/><circle cx="8" cy="9" r="1"/><circle cx="16" cy="8" r="1"/><circle cx="12" cy="14" r="2"/><path d="M6 15h1M17 15h1"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Sponge — saturation</span>
+          <span class="tool-tooltip" aria-hidden="true">Increase or reduce painted color saturation.</span>
         </span>
       </div>
+      <div class="tool-group" role="group" aria-label="SVG tools" data-icon="svg">
       <span class="tool-control">
         <button id="asset-library" class="icon-button" aria-label="Asset Library" title="Asset Library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg></button>
-        <span class="tool-tooltip" aria-hidden="true">Asset Library</span>
-      </span>
-      <span class="tool-control">
-        <button id="invert-colors" class="icon-button" aria-label="Invert selected layer colors" title="Invert selected layer colors (Ctrl/Cmd+I)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor"/></svg></button>
-        <span class="tool-tooltip" aria-hidden="true">Invert colors (Ctrl/Cmd+I)</span>
+        <span class="tool-tooltip" aria-hidden="true">Browse and place SVG motifs and repeating borders.</span>
       </span>
       <span class="tool-control">
         <button class="icon-button" data-tool="text" aria-label="Text" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6V3h16v3M12 3v18M8 21h8"/></svg></button>
-        <span class="tool-tooltip" aria-hidden="true">Text layer</span>
+        <span class="tool-tooltip" aria-hidden="true">Create or edit a text layer using SVG lettering.</span>
       </span>
+      </div>
       <div class="tool-group" role="group" aria-label="Canvas tools">
         <span class="tool-control">
           <button class="icon-button" data-tool="move" aria-label="Move" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 5V3a1.5 1.5 0 0 1 3 0v8M14 5a1.5 1.5 0 0 1 3 0v7M17 8a1.5 1.5 0 0 1 3 0v7c0 4-2 7-6 7h-1c-2 0-3.5-1-5-3l-4-6a1.5 1.5 0 0 1 2.5-1.7L8 14"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Move</span>
+          <span class="tool-tooltip" aria-hidden="true">Pan the canvas without moving or painting layers.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" data-tool="sample" aria-label="Color sampler" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 21 1-5L15 5l4 4L8 20zM13 3l8 8M16 6l3-3a2 2 0 0 1 3 3l-3 3"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Color sampler</span>
+          <span class="tool-tooltip" aria-hidden="true">Sample a reference color and add it to the palette.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="grid-toggle" aria-label="Grid size" aria-expanded="false" aria-controls="grid-settings" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="1"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Grid size</span>
+          <span class="tool-tooltip" aria-hidden="true">Change the number of cells in the pattern grid.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="crop-start" aria-label="Crop" aria-expanded="false" aria-controls="crop-settings" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14M10 6h8v8"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Crop</span>
+          <span class="tool-tooltip" aria-hidden="true">Trim the canvas to a chosen area and aspect ratio.</span>
         </span>
       </div>
       <div class="tool-group" role="group" aria-label="Selection and clipboard tools">
         <span class="tool-control">
           <button class="icon-button" data-tool="select" aria-label="Select" aria-pressed="false" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path stroke-dasharray="3 3" d="M3 3h18v18H3z"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Select a section</span>
+          <span class="tool-tooltip" aria-hidden="true">Select a rectangular area to copy, cut or move.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="copy" aria-label="Copy selection" aria-keyshortcuts="Control+c Meta+c" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="1"/><path d="M16 8V3H3v13h5"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Copy (Ctrl/Cmd+C)</span>
+          <span class="tool-tooltip" aria-hidden="true">Copy the selected pixels. Ctrl/Cmd+C.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="paste" aria-label="Paste" aria-keyshortcuts="Control+v Meta+v" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5H4v16h16V5h-4"/><rect x="8" y="2" width="8" height="5" rx="1"/><path d="M8 12h8M8 16h8"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Paste (Ctrl/Cmd+V)</span>
+          <span class="tool-tooltip" aria-hidden="true">Place copied pixels as an editable selection. Ctrl/Cmd+V.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="cut" aria-label="Cut selection" aria-keyshortcuts="Control+x Meta+x" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="3"/><circle cx="5" cy="18" r="3"/><path d="m7 8 14 13M7 16 21 3"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Cut (Ctrl/Cmd+X)</span>
+          <span class="tool-tooltip" aria-hidden="true">Copy and remove the selected pixels. Ctrl/Cmd+X.</span>
         </span>
       </div>
       <div class="tool-group" role="group" aria-label="History tools">
         <span class="tool-control">
           <button class="icon-button" id="undo" aria-label="Undo" aria-keyshortcuts="Control+z Meta+z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 3 10l6 6M3 10h11a7 7 0 0 1 7 7v3"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Undo (Ctrl/Cmd+Z)</span>
+          <span class="tool-tooltip" aria-hidden="true">Reverse the last edit. Ctrl/Cmd+Z.</span>
         </span>
         <span class="tool-control">
           <button class="icon-button" id="redo" aria-label="Redo" aria-keyshortcuts="Control+Shift+z Meta+Shift+z" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4 6 6-6 6M21 10H10a7 7 0 0 0-7 7v3"/></svg></button>
-          <span class="tool-tooltip" aria-hidden="true">Redo (Ctrl/Cmd+Shift+Z)</span>
+          <span class="tool-tooltip" aria-hidden="true">Restore the last undone edit. Ctrl/Cmd+Shift+Z.</span>
         </span>
       </div>
       <label class="check"><input id="reference-toggle" type="checkbox" checked disabled> Reference</label>
@@ -346,35 +343,50 @@
           <span class="tool-tooltip" aria-hidden="true">Delete selected color</span>
         </span>
         <div class="palette-add">
-          <label class="color-label">New color <input id="new-color" type="color" value="#bb543d"></label>
+          <label id="new-color-label" class="color-label">New color <input id="new-color" type="color" value="#bb543d"></label>
           <button id="add-color">Add color</button>
         </div>
       </section>
     </details>
-    <details id="yarn-menu">
-      <summary id="yarn-toggle">Yarn <span id="yarn-current">Original colors</span></summary>
-      <section class="palette-panel yarn-panel" aria-label="Yarn match">
-        <strong>Yarn match</strong>
-        <p class="fine">Preview your pattern in a yarn line's colors. Your project colors are never changed.</p>
-        <label class="yarn-select">Preview yarn line
-          <select id="yarn-line"><option value="">Original colors</option></select>
-        </label>
-        <div id="yarn-custom-section" hidden>
-          <strong class="yarn-heading">Custom mix</strong>
-          <p class="fine">The closest yarn for each of your colors, from any brand line.</p>
+    <div id="yarn-menu">
+      <button id="yarn-toggle" type="button" aria-haspopup="dialog">Yarn <span id="yarn-current">Original colors</span></button>
+    </div>
+    <dialog id="yarn-dialog" aria-labelledby="yarn-title">
+      <h2 id="yarn-title">Yarn palette</h2>
+      <p class="fine">Choose a yarn palette, then Confirm to substitute its colors without changing your original colors. Keep original colors restores their display. Cancel discards your selection.</p>
+      <div class="yarn-columns">
+        <section aria-labelledby="yarn-original-title">
+          <h3 id="yarn-original-title">Original palette</h3>
+          <button id="yarn-original-select" type="button" aria-pressed="true">Keep original colors</button>
+          <ul id="yarn-original"></ul>
+        </section>
+        <section aria-labelledby="yarn-custom-title">
+          <h3 id="yarn-custom-title">Custom Palette</h3>
+          <p class="fine">Closest yarn colors across brands. Mixed lines may differ in weight and fiber.</p>
           <div id="yarn-custom"></div>
-        </div>
-        <div>
-          <strong class="yarn-heading">Top matches</strong>
-          <p id="yarn-status" class="fine" role="status" aria-live="polite"></p>
+          <ul id="yarn-custom-details"></ul>
+        </section>
+        <section aria-labelledby="yarn-products-title">
+          <h3 id="yarn-products-title">Brand product lines</h3>
+        <label class="yarn-select">Preview yarn line
+          <select id="yarn-line"></select>
+        </label>
           <ol id="yarn-ranking"></ol>
-        </div>
+          <ul id="yarn-product-details"></ul>
+        </section>
+      </div>
+      <p id="yarn-status" class="fine" role="status" aria-live="polite"></p>
+      <button id="yarn-retry" type="button" hidden>Retry yarn catalog</button>
         <div id="yarn-mapping-section" hidden>
-          <strong class="yarn-heading">Your colors &rarr; yarn</strong>
+          <h3>Hex-translation key: <span id="yarn-selection"></span></h3>
           <ul id="yarn-mapping"></ul>
         </div>
-      </section>
-    </details>
+      <p class="fine">Details available: product line, hex color, and match score. Shade names, fiber, and weights are not in the catalog. Colors explicitly added from yarn lines keep their chosen hex values in every palette.</p>
+      <div class="yarn-actions">
+        <button id="yarn-confirm" type="button" disabled>Confirm</button>
+        <button id="yarn-cancel" type="button">Cancel</button>
+      </div>
+    </dialog>
     </div>
     <section class="zoom-bar" aria-label="Display zoom">
       <span>Zoom Controls</span>
@@ -388,6 +400,15 @@
     <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
     <input id="project-file" type="file" accept=".json,application/json" hidden>
   </main>
+  <dialog id="yarn-color-dialog" aria-labelledby="yarn-color-title">
+    <h2 id="yarn-color-title">Add a yarn color</h2>
+    <label>Brand product line <select id="yarn-color-line"></select></label>
+    <p class="fine">Choose from this line or switch to another. Added yarn colors keep their own hex values, including when you return to original colors.</p>
+    <p id="yarn-color-status" role="status" aria-live="polite"></p>
+    <button id="yarn-color-retry" type="button" hidden>Retry yarn catalog</button>
+    <div id="yarn-color-options" role="group" aria-label="Yarn shades"></div>
+    <div class="yarn-actions"><button id="yarn-color-cancel" type="button">Cancel</button></div>
+  </dialog>
   <div id="sample-preview" aria-hidden="true" hidden><span id="sample-swatch"></span><span id="sample-hex"></span></div>
   <dialog id="alignment-dialog" aria-labelledby="alignment-title">
     <h2 id="alignment-title">Center between cells?</h2>

@@ -2,8 +2,11 @@ import { MAX_SIDE, MAX_REFERENCE_SIDE, parseGridSize, gridDimensions, resizeCell
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from './crop.js';
 import { createPlacementEditor } from './placement.js';
 import { MAX_STROKE, brush, brushBounds, strokeWidth } from './objects.js';
-import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchCustomMix, matchYarnLine, prepareYarnLines, rankYarnLines } from './palette.js';
+import { USABLE_SCORE, CUSTOM_MIX, closestYarn, colorUsage, findClosestColor, matchYarnPalette, prepareYarnLines } from './palette.js';
 import { createImportPreview } from './import-preview.js';
+import { createYarnDialog } from './yarn-dialog.js';
+import { createYarnColorDialog } from './yarn-color-dialog.js';
+import { createToolToolbar } from './toolbar.js';
 import { activeLayer, bindLayer, migrateLayers, serializeLayers, flattenLayers, layerOrder, layerVisible,
     createLayerCompositor, flattenPixels, canWrite, writeLayerCell, canTransform, transformLayers,
     layerRaster, layerPixels, checkLayerMemory, newLayer, layerRoom, editLayerSelection, invertSelectedLayers, translateLayer, turnSelectedLayers } from './layers.js';
@@ -16,6 +19,7 @@ import { createAssetLibrary } from './asset-library.js';
 import { rasterAsset, transformAsset, resizeBorder, setBorderThickness, borderThicknessLimit } from './assets.js';
 
 const $ = id => document.getElementById(id);
+const toolToolbar = createToolToolbar(document.querySelector('.toolbar'));
 const canvas = $('canvas');
 const context = canvas.getContext('2d');
 const transparencyPattern = createTransparencyPattern(context);
@@ -220,6 +224,8 @@ function snapshot() {
     return {
         cols: project.cols, rows: project.rows, layers: structuredClone(project.layers), activeLayerId: project.activeLayerId,
         selectedLayerIds: [...project.selectedLayerIds],
+        palette: [...project.palette], selectedColor: selected,
+        yarnPalette: structuredClone(project.yarnPalette || { line: '', additions: [] }),
         width: project.width, height: project.height, referenceRect: project.referenceRect ?? null,
         reference: project.reference, referenceImage: reference,
     };
@@ -238,7 +244,7 @@ function prepareSampler() {
 function restoreSnapshot(saved) {
     lastBrushStroke = null;
     placement.cancel(true);
-    const { referenceImage, ...data } = saved;
+    const { referenceImage, selectedColor, ...data } = saved;
     Object.assign(project, data);
     textPanelLayerId = null;
     textEditGeneration++;
@@ -246,6 +252,8 @@ function restoreSnapshot(saved) {
     reference = referenceImage;
     prepareSampler();
     cursor = { x: 0, y: 0 };
+    selected = selectedColor;
+    setYarnLine(project.yarnPalette?.line || '');
     if (tool === 'cursor') placement.selectLayers();
 }
 
@@ -278,7 +286,6 @@ function changed() {
     updateControls();
     layerPanel.render();
     if (yarnLine) refreshYarnMapping();
-    if ($('yarn-menu').open) refreshYarnPanel();
 }
 
 async function save() {
@@ -346,6 +353,7 @@ function setStrokeWidth(value) {
 }
 
 function updateControls() {
+    $('yarn-toggle').disabled = !project || Boolean(crop);
     const active = Boolean(project);
     $('workspace-controls').hidden = !active;
     // File actions all need an open project; the start screen offers projects and import instead.
@@ -357,7 +365,6 @@ function updateControls() {
         for (const id of ['add-row-above', 'add-row-below', 'add-rows']) $(id).disabled ||= project.rows >= MAX_SIDE;
     }
     for (const id of ['name', 'backup', 'export', 'grid-toggle', 'crop-start', 'reference-toggle', 'lines-toggle', 'snapping-toggle']) $(id).disabled = !active || Boolean(crop);
-    $('projects').disabled = Boolean(crop);
     document.querySelectorAll('[data-tool]').forEach(button => { button.disabled = !active || Boolean(crop); });
     $('undo').disabled = !active || Boolean(crop) || (!history.length && !placement.active);
     $('redo').disabled = !active || Boolean(crop) ||
@@ -392,7 +399,6 @@ function updateControls() {
     }
     if (assetLayer && document.activeElement !== $('asset-layer-color')) $('asset-layer-color').value = assetLayer.asset.color;
     $('text-new').disabled = !active || Boolean(crop) || creatingText;
-    $('invert-colors').disabled = !active || Boolean(crop);
     $('text-rasterize').disabled = !textLayer || textLayer.locks.all || Boolean(crop);
     for (const id of ['text-content', 'text-font', 'text-size', 'text-color']) $(id).disabled = !textLayer || textLayer.locks.all || Boolean(crop);
     if (textLayer) {
@@ -447,6 +453,7 @@ function updateControls() {
         $('grid-size').value = Math.max(project.cols, project.rows);
         $('grid-number').value = $('grid-size').value;
     }
+    toolToolbar.update();
     renderBrushPreview();
 }
 
@@ -500,7 +507,9 @@ function renderPalette() {
         Array.from($('palette').children).find(button => button.title === focusedColor)?.focus({ preventScroll: true });
     }
     $('add-color').disabled = !project || Boolean(crop);
-    $('new-color').disabled = !project || Boolean(crop);
+    $('new-color').disabled = !project || Boolean(crop) || Boolean(yarnLine);
+    $('new-color-label').hidden = Boolean(yarnLine);
+    $('add-color').textContent = yarnLine ? 'Add yarn color' : 'Add color';
     $('delete-color').disabled = !project || Boolean(crop) || !selected;
     if (yarnLine && project && yarnPaletteKey !== project.palette.join()) {
         refreshYarnMapping();
@@ -517,7 +526,7 @@ $('palette-menu').addEventListener('keydown', event => {
     }
 });
 document.addEventListener('pointerdown', event => {
-    for (const id of ['palette-menu', 'file-menu', 'canvas-menu', 'layer-menu', 'yarn-menu']) {
+    for (const id of ['palette-menu', 'file-menu', 'canvas-menu', 'layer-menu']) {
         const menu = $(id);
         if (menu.open && !menu.contains(event.target)) menu.open = false;
     }
@@ -528,10 +537,11 @@ let yarnLines = null, yarnLoading = null, yarnLine = null, yarnMatch = null, yar
 
 function displayColor(color) {
     if (!yarnLine) return color;
+    if (project.yarnPalette?.additions.some(item => item.color === color.toLowerCase())) return color;
     let yarn = yarnMap.get(color);
     if (yarn === undefined) {
         // Colors outside the current match (e.g. painted since it was computed) use their nearest yarn.
-        try { yarn = yarnLine.custom ? closestYarn(color, yarnLines).yarn : findClosestColor(color, yarnLine.colors); } catch { yarn = color; }
+        yarn = yarnLine.custom ? closestYarn(color, yarnLines).yarn : findClosestColor(color, yarnLine.colors);
         yarnMap.set(color, yarn);
     }
     return yarn;
@@ -541,7 +551,7 @@ function refreshYarnMapping() {
     if (!yarnLine || !project) return;
     const previous = yarnMap;
     const usage = colorUsage(flattenLayers(project), project.palette);
-    yarnMatch = yarnLine.custom ? matchCustomMix(usage, yarnLines) : matchYarnLine(usage, yarnLine);
+    yarnMatch = matchYarnPalette(usage, yarnLines, yarnLine.name, project.yarnPalette?.additions || []);
     yarnMap = new Map();
     for (const [color, match] of yarnMatch.mapping) yarnMap.set(color, match.yarn);
     // The match is keyed by lowercase hex; also key the project's own spelling for fast lookups.
@@ -554,7 +564,6 @@ function refreshYarnMapping() {
         paintedTiles = null;
         render();
     }
-    renderYarnMapping();
 }
 
 function loadYarnLines() {
@@ -565,10 +574,6 @@ function loadYarnLines() {
         })
         .then(data => {
             yarnLines = prepareYarnLines(data).sort((a, b) => a.name.localeCompare(b.name));
-            const group = document.createElement('optgroup');
-            group.label = `All yarn lines (${yarnLines.length})`;
-            group.append(...yarnLines.map(line => new Option(`${line.name} (${line.colors.length})`, line.name)));
-            $('yarn-line').append(group);
             return yarnLines;
         })
         .catch(error => { yarnLoading = null; throw error; });
@@ -576,12 +581,14 @@ function loadYarnLines() {
 }
 
 function setYarnLine(name) {
+    if (name && name !== CUSTOM_MIX && !yarnLines?.some(line => line.name === name)) {
+        throw new Error(`Yarn line "${name}" is not available in the catalog.`);
+    }
     yarnLine = name === CUSTOM_MIX ? { name: CUSTOM_MIX, custom: true }
         : name ? yarnLines.find(line => line.name === name) || null : null;
     yarnMap = new Map();
     yarnMatch = null;
     yarnPaletteKey = '';
-    $('yarn-line').value = yarnLine ? yarnLine.name : '';
     $('yarn-current').textContent = yarnLine ? yarnLine.name : 'Original colors';
     $('yarn-toggle').title = yarnLine ? `Previewing yarn line ${yarnLine.name}` : 'Yarn match - showing original colors';
     $('yarn-menu').toggleAttribute('data-previewing', Boolean(yarnLine));
@@ -591,7 +598,6 @@ function setYarnLine(name) {
     document.querySelectorAll('.yarn-option').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.line === name)));
     if (yarnLine) refreshYarnMapping();
     else {
-        renderYarnMapping();
         paintedTiles = null;
         render();
     }
@@ -603,14 +609,6 @@ function swatchChip(color) {
     chip.className = 'yarn-chip';
     chip.style.background = color;
     return chip;
-}
-
-function renderYarnMapping() {
-    const list = $('yarn-mapping');
-    list.replaceChildren();
-    $('yarn-mapping-section').hidden = !yarnLine || !yarnMatch || !yarnMatch.mapping.size;
-    if ($('yarn-mapping-section').hidden) return;
-    renderYarnColors(list, colorUsage(flattenLayers(project), project.palette), yarnMatch);
 }
 
 function renderYarnColors(list, usage, matchResult = null, showCounts = false) {
@@ -629,6 +627,9 @@ function renderYarnColors(list, usage, matchResult = null, showCounts = false) {
         } else {
             const arrow = document.createElement('span');
             arrow.textContent = '\u2192';
+            const original = document.createElement('span');
+            original.className = 'yarn-source';
+            original.textContent = color;
             const yarn = document.createElement('span');
             yarn.className = 'yarn-source';
             yarn.textContent = match.line ? `${match.line} \u00b7 ${match.yarn}` : match.yarn;
@@ -640,7 +641,7 @@ function renderYarnColors(list, usage, matchResult = null, showCounts = false) {
                 ? 'This line has fewer yarns than your pattern has distinct colors, so this color reuses its nearest yarn.'
                 : `Match score ${Math.round(match.score)} of 100`;
             item.title = `${color} \u2192 ${match.line ? `${match.line} ` : ''}${match.yarn}`;
-            item.append(arrow, swatchChip(match.yarn), yarn, score);
+            item.append(original, arrow, swatchChip(match.yarn), yarn, score);
         }
         if (showCounts) {
             const count = document.createElement('span');
@@ -684,66 +685,30 @@ function yarnOption(result, rankLabel, detailText, onSelect = name => setYarnLin
     return button;
 }
 
-function renderYarnRanking(ranking, custom, colorCount) {
-    const list = $('yarn-ranking');
-    list.replaceChildren();
-    $('yarn-status').textContent = !colorCount
-        ? 'Add or paint colors to get yarn recommendations.'
-        : `Best of ${yarnLines.length} lines for your ${colorCount} color${colorCount === 1 ? '' : 's'}. Scores weigh how close each color is and how much of the pattern uses it.`;
-    $('yarn-custom-section').hidden = !custom.total;
-    $('yarn-custom').replaceChildren();
-    if (custom.total) {
-        $('yarn-custom').append(yarnOption(custom, 'Mix',
-            `${custom.usable} of ${custom.total} colors usable \u00b7 ${custom.size} yarn${custom.size === 1 ? '' : 's'} from ${custom.lines} line${custom.lines === 1 ? '' : 's'}`));
-    }
-    ranking.forEach((result, index) => {
-        const item = document.createElement('li');
-        item.append(yarnOption(result, index === 0 ? 'Best' : `#${index + 1}`,
-            `${result.usable} of ${result.total} colors usable \u00b7 ${result.size} yarns in line`));
-        list.append(item);
-    });
-    // Mirror the recommendations in the selector so keyboard users can reach them first.
-    $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
-    if (ranking.length) {
-        const group = document.createElement('optgroup');
-        group.label = 'Recommended';
-        group.dataset.recommended = '';
-        group.append(new Option(`${CUSTOM_MIX} (any brand) - ${Math.round(custom.score)}`, CUSTOM_MIX),
-            ...ranking.map((result, index) => new Option(`${index + 1}. ${result.name} - ${Math.round(result.score)}`, result.name)));
-        $('yarn-line').options[0].after(group);
-        $('yarn-line').value = yarnLine ? yarnLine.name : '';
-    }
-}
-
-async function refreshYarnPanel() {
-    if (!project) return;
-    $('yarn-status').textContent = yarnLines ? 'Scoring yarn lines...' : 'Loading the yarn catalog...';
-    try {
-        await loadYarnLines();
-    } catch (error) {
-        $('yarn-status').textContent = error.message;
-        return;
-    }
-    // Let the status paint before the ranking work.
-    await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve)));
-    if (!project || !$('yarn-menu').open) return;
-    const usage = colorUsage(flattenLayers(project), project.palette);
-    renderYarnRanking(rankYarnLines(usage, yarnLines, 5), matchCustomMix(usage, yarnLines), usage.length);
-    if (yarnLine) refreshYarnMapping();
-}
-
-$('yarn-menu').addEventListener('toggle', () => {
-    if ($('yarn-menu').open) refreshYarnPanel();
-});
-$('yarn-menu').addEventListener('keydown', event => {
-    if (event.key === 'Escape' && $('yarn-menu').open) {
-        event.preventDefault();
-        event.stopPropagation();
-        $('yarn-menu').open = false;
-        $('yarn-toggle').focus({ preventScroll: true });
+createYarnDialog({
+    loadLines: loadYarnLines,
+    getUsage: () => colorUsage(flattenLayers(project), project.palette),
+    getSelection: () => yarnLine?.name || '',
+    getAdditions: () => project.yarnPalette?.additions || [],
+    yarnOption, renderColors: renderYarnColors, report,
+    confirm: match => {
+        finishStroke();
+        if (placement.commit() === false) throw new Error('Finish the current placement before applying yarn colors.');
+        const name = match?.name || '';
+        if (name === (project.yarnPalette?.line || '') && name === (yarnLine?.name || '')) return;
+        const before = snapshot();
+        project.yarnPalette = { line: name, additions: project.yarnPalette?.additions || [] };
+        setYarnLine(name);
+        remember(before);
+        changed();
+        notify(name ? 'Yarn colors substituted. Your original colors are preserved.' : 'Showing original colors, including added yarn shades.');
     }
 });
-$('yarn-line').addEventListener('change', () => setYarnLine($('yarn-line').value));
+
+const yarnColorDialog = createYarnColorDialog({
+    loadLines: loadYarnLines, getLine: () => yarnLine?.name || '',
+    add: (color, line) => addPaletteColor(color, line), report
+});
 
 // Sizes the canvas element and workspace for the current zoom without touching the bitmap.
 function layoutCanvas() {
@@ -1133,10 +1098,18 @@ async function activate(data) {
     $('project-dialog').close();
     $('yarn-ranking').replaceChildren();
     $('yarn-custom').replaceChildren();
-    $('yarn-custom-section').hidden = true;
     $('yarn-line').querySelector('optgroup[data-recommended]')?.remove();
-    $('yarn-menu').open = false;
-    if (yarnLine) setYarnLine('');
+    $('yarn-dialog').close();
+    if (project.yarnPalette?.line) {
+        try {
+            await loadYarnLines();
+            setYarnLine(project.yarnPalette.line);
+        } catch (error) {
+            setYarnLine('');
+            report(error);
+            notify('Could not restore the yarn palette. Showing preserved original colors; reopen Yarn to retry.', true);
+        }
+    } else setYarnLine('');
     updateControls();
     clearGridError();
     renderPalette();
@@ -1175,11 +1148,24 @@ async function newFromImage(image, name) {
     return true;
 }
 
-function addPaletteColor(color) {
+function addPaletteColor(color, lineName = null) {
+    if (yarnLine && !lineName) {
+        const match = yarnLine.custom ? closestYarn(color, yarnLines) :
+            { yarn: findClosestColor(color, yarnLine.colors), line: yarnLine.name };
+        color = match.yarn;
+        lineName = match.line;
+    }
+    if (lineName && !yarnLines?.some(line => line.name === lineName && line.colors.includes(color))) {
+        throw new Error('Choose a yarn color from the catalog.');
+    }
     const existing = project.palette.find(item => item.toLowerCase() === color);
-    if (!existing) {
-        if (project.palette.length >= 32) throw new Error('The demo supports up to 32 palette colors per project.');
-        project.palette.push(color);
+    if (!existing && project.palette.length >= 32) throw new Error('The demo supports up to 32 palette colors per project.');
+    const additions = project.yarnPalette?.additions || [];
+    const pin = Boolean(lineName) && !additions.some(item => item.color === color);
+    if (!existing || pin) {
+        remember(snapshot());
+        if (!existing) project.palette.push(color);
+        if (pin) project.yarnPalette = { line: yarnLine?.name || '', additions: [...additions, { color, line: lineName }] };
         changed();
     }
     selected = existing || color;
@@ -1896,7 +1882,6 @@ function invertLayers() {
     placement.selectLayers();
     render();
 }
-action('invert-colors', invertLayers);
 const TURN_NOTICES = {
     'mirror-horizontal': 'Mirrored left to right', 'mirror-vertical': 'Mirrored top to bottom',
     'rotate-right': 'Rotated 90\u00b0 right', 'rotate-left': 'Rotated 90\u00b0 left',
@@ -2403,6 +2388,7 @@ $('name').addEventListener('input', () => {
 });
 $('name').addEventListener('blur', () => { if (project) $('name').value = project.name; });
 action('add-color', () => {
+    if (yarnLine) { yarnColorDialog.open(); return; }
     const color = $('new-color').value.toLowerCase();
     addPaletteColor(color);
 });
@@ -2430,7 +2416,10 @@ const importPreview = createImportPreview({
             cols: result.cols, rows: result.rows, palette: result.palette, cells: result.cells,
             updatedAt: Date.now(),
         }))) return false;
-        if (yarn) setYarnLine(yarn);
+        if (yarn) {
+            project.yarnPalette = { line: yarn, additions: [] };
+            setYarnLine(yarn);
+        }
         changed();
         notify(`Created ${result.cols} x ${result.rows} editable cells with ${result.palette.length} colors. Your reference and estimated colors are preserved.`);
         return true;
@@ -2609,14 +2598,6 @@ async function listProjects() {
         $('project-list').append(row);
     }
 }
-
-action('projects', async () => {
-    $('project-dialog').querySelector('.dialog-message').textContent = '';
-    $('project-dialog').showModal();
-    // Keep backup/import controls usable if browser storage is blocked.
-    try { await save(); await listProjects(); }
-    catch (error) { $('project-list').textContent = error.message; report(error); }
-});
 
 // Start screen: a scrollable list with "Create new" first, then saved projects newest first.
 // Each row's background is a crisp render of the project, cropped to a horizontal slice.

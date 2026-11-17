@@ -177,14 +177,10 @@ h1 span {
   border-top: 1px solid var(--line);
 }
 .tool-group {
-  display: flex;
-  gap: 6px;
-  padding: 5px;
-  border: 1px solid var(--line);
+  flex: 0 0 auto;
 }
 .tool-control {
-  position: relative;
-  display: inline-flex;
+  display: block;
 }
 .icon-button {
   display: inline-flex;
@@ -204,35 +200,88 @@ h1 span {
   stroke-linejoin: round;
   pointer-events: none;
 }
-.tool-tooltip {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  background: #000;
-  color: var(--ink);
-  font-size: 12px;
-  white-space: nowrap;
-  pointer-events: none;
-  visibility: hidden;
-  opacity: 0;
+.tool-group-trigger {
+  position: relative;
 }
-.tool-control:hover .tool-tooltip,
-.tool-control:focus-within .tool-tooltip {
-  visibility: visible;
-  opacity: 1;
+.tool-group-trigger::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border: 3px solid transparent;
+  border-top: 0;
+  border-right-color: currentColor;
+}
+.tool-group-trigger.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+.svg-tool-icon {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.tool-dropdown,
+.toolbar-tooltip {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 8px 24px #0005;
+}
+.tool-dropdown {
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(65dvh, 480px);
+  overflow-y: auto;
+  padding: 6px;
+}
+.tool-dropdown .icon-button {
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  justify-content: flex-start;
+  gap: 12px;
+  text-align: left;
+}
+.tool-dropdown svg {
+  flex: 0 0 22px;
+}
+.tool-dropdown strong,
+.tool-dropdown small {
+  display: block;
+}
+.tool-dropdown small {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+.toolbar-tooltip {
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100dvh - 16px);
+  overflow: hidden;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-line;
+  pointer-events: none;
 }
 .toolbar {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  overflow-x: auto;
   align-items: center;
   padding: 10px 24px;
   border-bottom: 1px solid var(--line);
   background: var(--paper);
+}
+.toolbar > * {
+  flex-shrink: 0;
 }
 .name-label {
   display: flex;
@@ -1096,15 +1145,6 @@ input[type="color"] {
   font-size: 12px;
   list-style: none;
 }
-#yarn-toggle::-webkit-details-marker {
-  display: none;
-}
-#yarn-toggle::after {
-  content: "+";
-}
-#yarn-menu[open] #yarn-toggle::after {
-  content: "-";
-}
 #yarn-current {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1114,13 +1154,65 @@ input[type="color"] {
 #yarn-menu[data-previewing] #yarn-current {
   color: var(--accent);
 }
-.yarn-panel {
-  width: 360px;
-  max-height: min(520px, 65dvh);
-  gap: 12px;
+#yarn-dialog {
+  width: min(1180px, 94vw);
 }
-.yarn-panel .fine {
-  margin: 0;
+.yarn-columns {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(230px, 1fr) minmax(260px, 1.3fr);
+  gap: 16px;
+}
+.yarn-columns > section {
+  min-width: 0;
+  border: 1px solid var(--line);
+  padding: 12px;
+  max-height: 48dvh;
+  overflow: auto;
+}
+.yarn-columns h3 { margin-top: 0; }
+.yarn-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+#yarn-original,
+#yarn-custom-details,
+#yarn-product-details {
+  list-style: none;
+  padding: 0;
+}
+#yarn-original li,
+#yarn-custom-details li,
+#yarn-product-details li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#yarn-original-select[aria-pressed="true"] { border-color: var(--accent); }
+#yarn-color-line { width: 100%; }
+#yarn-color-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+  gap: 8px;
+  max-height: 45dvh;
+  overflow: auto;
+}
+#yarn-color-options button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 12px monospace;
+}
+#yarn-mapping li { flex-wrap: wrap; }
+@media (max-width: 900px) {
+  .yarn-columns {
+    grid-template-columns: minmax(120px, 0.7fr) minmax(180px, 1fr) minmax(210px, 1.2fr);
+    gap: 8px;
+  }
 }
 .yarn-select {
   display: flex;

@@ -7,7 +7,7 @@
 <script type="module">
 import { MAX_SIDE, MAX_REFERENCE_SIDE, parseGridSize, gridDimensions, resizeCells, cropCells, extendCells, mirrorCells, rotateCells, referenceRect, extendBoard, mirrorBoard, rotateBoard, flood, line, validateProject, openStore } from '../tools/pattern-studio/model.js';
 import { CROP_RATIOS, fitCrop, moveCrop, resizeCrop } from '../tools/pattern-studio/crop.js';
-import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
+import { ZERO_SCORE_DISTANCE, closestYarn, colorDistance, colorUsage, findClosestColor, matchCustomMix, matchScore, matchYarnLine, matchYarnPalette, prepareYarnLines, rankYarnLines } from '../tools/pattern-studio/palette.js';
 import { boxFromCells, brush, brushBounds, copyCells, objectCorners, rasterObject, resizeObject, shapeMask, strokeWidth, snapTranslation } from '../tools/pattern-studio/objects.js';
 import { approximateGrid, approximationDimensions } from '../tools/pattern-studio/approximation.js';
 import { createPlacementEditor } from '../tools/pattern-studio/placement.js';
@@ -26,6 +26,9 @@ import { assetCatalog, validateAssetCatalog, assetList, loadAsset, parseAssetSvg
     validateAsset, rasterAsset, transformAsset, placedAsset, assetThumbnail, resizeBorder, setBorderThickness, borderThicknessLimit } from '../tools/pattern-studio/assets.js';
 import { validateRepeatLayout, repeatingBorderPlan, repeatSpacing, sequenceSpacing } from '../tools/pattern-studio/border-layout.js';
 import { createAssetLibrary } from '../tools/pattern-studio/asset-library.js';
+import { createYarnDialog } from '../tools/pattern-studio/yarn-dialog.js';
+import { createYarnColorDialog } from '../tools/pattern-studio/yarn-color-dialog.js';
+import { createToolToolbar } from '../tools/pattern-studio/toolbar.js';
 import { vectorBounds } from '../tools/pattern-studio/vector.js';
 const results = [];
 const assert = (condition, name) => {
@@ -40,6 +43,173 @@ const rejects = (run, name) => {
 const database = `pattern-studio-test-${crypto.randomUUID()}`;
 let store;
 try {
+    {
+        const response = await fetch('../tools/pattern-studio/index.html');
+        if (!response.ok) throw new Error('Could not load toolbar UI fixture.');
+        const fixture = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const toolbar = document.importNode(fixture.querySelector('.toolbar'), true);
+        document.body.append(toolbar);
+        const paint = toolbar.querySelector('[data-tool="paint"]');
+        const erase = toolbar.querySelector('[data-tool="erase"]');
+        paint.disabled = erase.disabled = false;
+        const editor = createToolToolbar(toolbar);
+        try {
+            editor.update();
+            const drawing = toolbar.querySelector('.tool-group-trigger');
+            const panel = toolbar.querySelector('.tool-dropdown');
+            assert(toolbar.querySelectorAll('.tool-group-trigger').length === 6 &&
+                !toolbar.querySelector('#invert-colors') &&
+                toolbar.querySelector('[data-icon="svg"] #asset-library') &&
+                toolbar.querySelector('[data-icon="svg"] [data-tool="text"]'),
+                'Toolbar collapses its existing groups into six dropdowns, with SVG tools together and no Invert button');
+            drawing.dispatchEvent(new MouseEvent('mouseenter'));
+            assert(toolbar.querySelector('[role="tooltip"]').textContent.includes('Paint: Brush individual cells'),
+                'Hovering a group describes its available tools');
+            drawing.click();
+            assert(panel.matches(':popover-open'), 'A group opens a dropdown without replacing its tool buttons');
+            drawing.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            assert(!panel.matches(':popover-open'), 'Escape also closes a dropdown while its group button still has focus');
+            drawing.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+            assert(document.activeElement === paint, 'Keyboard opening focuses the first enabled tool');
+            paint.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+            assert(document.activeElement === erase, 'Dropdown arrow navigation skips disabled tools');
+            erase.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            assert(!panel.matches(':popover-open') && document.activeElement === drawing,
+                'Escape closes the tool dropdown and restores focus');
+            let selected = false;
+            erase.addEventListener('click', () => {
+                selected = true;
+                paint.setAttribute('aria-pressed', 'false');
+                erase.setAttribute('aria-pressed', 'true');
+                editor.update();
+            });
+            drawing.click();
+            erase.click();
+            assert(selected && !panel.matches(':popover-open') && drawing.classList.contains('active') &&
+                drawing.querySelector('svg').outerHTML === erase.querySelector('svg').outerHTML,
+                'Choosing a tool preserves its handler, closes the dropdown and updates the active group icon');
+            drawing.click();
+            toolbar.dispatchEvent(new Event('scroll'));
+            assert(!panel.matches(':popover-open') && !toolbar.querySelector('[role="tooltip"]').matches(':popover-open'),
+                'Scrolling the toolbar dismisses detached dropdowns and tooltips');
+        } finally { editor.destroy(); toolbar.remove(); }
+    }
+    {
+        const response = await fetch('../tools/pattern-studio/index.html');
+        if (!response.ok) throw new Error('Could not load yarn-dialog UI fixture.');
+        const fixture = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const host = document.createElement('div');
+        host.append(document.importNode(fixture.getElementById('yarn-toggle'), true),
+            document.importNode(fixture.getElementById('yarn-dialog'), true));
+        document.body.append(host);
+        const lines = prepareYarnLines({ Reds: ['#aa0000'], Blues: ['#0000aa'] });
+        const applied = [];
+        let fail = false, notices = 0;
+        const editor = createYarnDialog({
+            loadLines: async () => { if (fail) throw new Error('Catalog unavailable'); return lines; },
+            getUsage: () => [{ color: '#bb0000', count: 1 }],
+            yarnOption: (match, rank, detail, select) => {
+                const button = document.createElement('button');
+                button.className = 'yarn-option'; button.dataset.line = match.name;
+                button.addEventListener('click', () => select(match.name));
+                return button;
+            },
+            renderColors: (list, usage, match) => { list.textContent = match ? [...match.mapping.keys()].join() : usage.map(v => v.color).join(); },
+            confirm: match => applied.push(match),
+            report: () => { notices++; }
+        });
+        try {
+            await editor.open();
+            assert([...host.querySelector('#yarn-line').options].map(option => option.value).join() === 'Reds,Blues',
+                'Yarn dropdown contains only product lines, not original colors or the custom palette');
+            host.querySelector('#yarn-custom button').click();
+            assert(host.querySelector('#yarn-line').selectedIndex === -1,
+                'Selecting the custom palette clears the product-line dropdown selection');
+            assert(applied.length === 0 && !host.querySelector('#yarn-mapping-section').hidden &&
+                host.querySelector('#yarn-custom-details').textContent.includes('Reds'),
+                'Custom yarn selection shows provenance and a translation key without applying');
+            host.querySelector('#yarn-cancel').click();
+            assert(applied.length === 0, 'Cancel discards the yarn selection');
+            await editor.open();
+            const select = host.querySelector('#yarn-line');
+            select.value = 'Reds'; select.dispatchEvent(new Event('change'));
+            assert(host.querySelector('#yarn-product-details').textContent.includes('#aa0000'),
+                'Choosing a product line displays its selected yarn details');
+            host.querySelector('#yarn-confirm').click();
+            assert(applied.length === 1 && applied[0].name === 'Reds' && !host.querySelector('dialog').open,
+                'Confirm applies only the selected product line and closes the dialog');
+            await editor.open();
+            host.querySelector('dialog').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            assert(applied.length === 1 && !host.querySelector('dialog').open, 'Escape discards the dialog draft');
+            fail = true;
+            await editor.open();
+            assert(notices === 1 && !host.querySelector('#yarn-retry').hidden &&
+                host.querySelector('#yarn-confirm').disabled, 'Catalog errors are reported and offer retry without applying');
+        } finally {
+            host.querySelector('dialog').close();
+            host.remove();
+        }
+    }
+    {
+        const usage = [{ color: '#bb0000', count: 10 }, { color: '#0000aa', count: 1 }];
+        const lines = prepareYarnLines({ Reds: ['#aa0000'], Blues: ['#0000aa'] });
+        const additions = [{ color: '#0000aa', line: 'Blues' }];
+        const before = JSON.stringify({ usage, additions });
+        const red = matchYarnPalette(usage, lines, 'Reds', additions);
+        const blue = matchYarnPalette(usage, lines, 'Blues', additions);
+        const again = matchYarnPalette(usage, lines, 'Reds', additions);
+        assert(red.mapping.get('#bb0000').yarn === '#aa0000' &&
+            blue.mapping.get('#bb0000').yarn === '#0000aa' &&
+            again.mapping.get('#bb0000').yarn === red.mapping.get('#bb0000').yarn,
+            'Switching yarn palettes always substitutes from the same original colors');
+        assert(red.mapping.get('#0000aa').yarn === '#0000aa' &&
+            red.mapping.get('#0000aa').line === 'Blues' && red.mapping.get('#0000aa').score === 100,
+            'A yarn shade added from another line keeps its exact hex and provenance');
+        assert(JSON.stringify({ usage, additions }) === before,
+            'Yarn substitutions never overwrite source colors or explicit yarn additions');
+        assert(rankYarnLines(usage, lines, 2, additions).every(match =>
+            match.mapping.get('#0000aa').yarn === '#0000aa'),
+            'Recommendations preserve explicitly selected yarn shades');
+        rejects(() => matchYarnPalette(usage, lines, 'Missing', additions),
+            'An unavailable saved yarn line reports an error instead of silently substituting');
+        const saved = { version: 1, name: 'Yarn source', width: 1, height: 1, cols: 1, rows: 1,
+            reference: 'data:image/png;base64,AAAA', palette: ['#bb0000'], cells: ['#bb0000'],
+            yarnPalette: { line: 'Reds', additions } };
+        const restored = validateProject(JSON.parse(JSON.stringify(saved)));
+        assert(restored.cells[0] === '#bb0000' && restored.yarnPalette.additions[0].color === '#0000aa' &&
+            restored.yarnPalette.line === 'Reds', 'Saved yarn selection and additions retain untouched source colors');
+        rejects(() => validateProject({ ...saved, yarnPalette: { line: 'Reds', additions: [{ color: 'invalid', line: 'Blues' }] } }),
+            'Saved yarn additions reject malformed hex colors');
+        rejects(() => validateProject({ ...saved, yarnPalette: { line: 'Reds', additions: [...additions, ...additions] } }),
+            'Saved yarn additions reject duplicate source-color identities');
+    }
+    {
+        const response = await fetch('../tools/pattern-studio/index.html');
+        if (!response.ok) throw new Error('Could not load yarn-color UI fixture.');
+        const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const host = document.createElement('div');
+        host.append(document.importNode(html.getElementById('yarn-color-dialog'), true));
+        document.body.append(host);
+        const picked = [];
+        const picker = createYarnColorDialog({
+            loadLines: async () => prepareYarnLines({ Reds: ['#aa0000'], Blues: ['#0000aa'] }),
+            getLine: () => 'Reds', add: (color, line) => picked.push({ color, line }),
+            report: error => { throw error; }
+        });
+        try {
+            await picker.open();
+            assert(host.querySelector('#yarn-color-line').value === 'Reds' &&
+                !host.querySelector('input'), 'Adding a yarn color offers catalog shades rather than hex entry');
+            const select = host.querySelector('#yarn-color-line');
+            select.value = 'Blues'; select.dispatchEvent(new Event('change'));
+            host.querySelector('#yarn-color-options button').click();
+            assert(picked[0].color === '#0000aa' && picked[0].line === 'Blues',
+                'The yarn color picker allows an exact shade from a different product line');
+        } finally {
+            host.querySelector('dialog').close();
+            host.remove();
+        }
+    }
     {
         const response = await fetch('../tools/pattern-studio/index.html');
         if (!response.ok) throw new Error('Could not load asset-library UI fixture.');

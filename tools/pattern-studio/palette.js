@@ -140,15 +140,38 @@ export function matchYarnLine(usage, line) {
 }
 
 // Ranks every yarn line; ties prefer more usable colors, then the larger line, then name order.
-export function rankYarnLines(usage, lines, limit = 5) {
+export function rankYarnLines(usage, lines, limit = 5, additions = []) {
     if (!usage.length) return [];
     const groups = groupColors(usage);
-    return lines.map(line => scoreLine(groups, line))
+    return lines.map(line => additions.length ? matchYarnPalette(usage, lines, line.name, additions) : scoreLine(groups, line))
         .sort((a, b) => b.score - a.score || b.usable - a.usable || b.size - a.size || a.name.localeCompare(b.name))
         .slice(0, limit);
 }
 
 export const CUSTOM_MIX = 'Custom mix';
+
+// Explicit yarn additions keep their own shade even when previewing another line.
+export function matchYarnPalette(usage, lines, name, additions = []) {
+    const line = name === CUSTOM_MIX ? null : lines.find(line => line.name === name);
+    if (name !== CUSTOM_MIX && !line) throw new Error(`Yarn line "${name}" is not available in the catalog.`);
+    const pinned = new Map(additions.map(item => [item.color.toLowerCase(), item]));
+    const remaining = usage.filter(item => !pinned.has(item.color.toLowerCase()));
+    const result = line ? matchYarnLine(remaining, line) : matchCustomMix(remaining, lines);
+    for (const item of usage) {
+        const yarn = pinned.get(item.color.toLowerCase());
+        if (yarn) result.mapping.set(item.color, { yarn: yarn.color, line: yarn.line, score: 100, shared: false });
+    }
+    const total = usage.reduce((sum, item) => sum + item.count, 0);
+    result.score = usage.reduce((sum, item) => sum + result.mapping.get(item.color).score *
+        (total ? 0.5 / usage.length + 0.5 * item.count / total : 1 / usage.length), 0);
+    result.total = result.mapping.size;
+    result.usable = [...result.mapping.values()].filter(item => item.score >= USABLE_SCORE).length;
+    if (result.custom) {
+        result.size = new Set([...result.mapping.values()].map(item => item.yarn)).size;
+        result.lines = new Set([...result.mapping.values()].map(item => item.line)).size;
+    }
+    return result;
+}
 
 // The k nearest distinct yarn colors across every line, closest first. Ties keep catalog order.
 function nearestYarns(lab, lines, k) {

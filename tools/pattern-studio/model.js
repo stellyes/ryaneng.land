@@ -176,6 +176,16 @@ export function validateProject(data) {
         throw new Error('The project grid does not match its reference proportions.');
     }
     if (data.version === 2 || data.layers !== undefined) validateLayers(data);
+    if (data.yarnPalette !== undefined) {
+        const yarn = data.yarnPalette;
+        const lineName = name => typeof name === 'string' && name.length <= 200;
+        if (!yarn || !lineName(yarn.line) || !Array.isArray(yarn.additions) || yarn.additions.length > 10000 ||
+            yarn.additions.some(item => !item || typeof item.color !== 'string' || !/^#[0-9a-f]{6}$/.test(item.color) ||
+                !lineName(item.line) || !item.line.trim()) ||
+            new Set(yarn.additions.map(item => item.color)).size !== yarn.additions.length) {
+            throw new Error('Invalid saved yarn palette. Choose a valid Pattern Studio project JSON file.');
+        }
+    }
     return data;
 }
 
